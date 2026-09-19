@@ -41,22 +41,40 @@ Every legacy capability or proposed subsystem receives one disposition:
 | Context discovery | ai-workflow + repo context | MOVE | How is relevant context found without a central registry? | Context |
 | Context budget | ai-workflow/runner | KEEP | What hard limits and measurements are needed? | Context |
 | Token/agent-call budget | workflow conventions | KEEP | Which budgets are first-class run policy? | Policy |
-| Agent abstraction | Sol/Luna/Codex roles | REDESIGN | What provider-neutral contract is sufficient? | Agent |
+| Agent abstraction | legacy model roles | REDESIGN | What provider-neutral contract is sufficient? | Agent |
 | Model routing | role conventions | REDESIGN | How are capability/cost policies expressed without vendor names? | Agent/Policy |
-| Sandboxing | macOS/Codex boundary | REDESIGN | Local process, container, or library primitives? | Sandbox |
+| Sandboxing | local execution boundary | REDESIGN | Local process, container, or library primitives? | Sandbox |
 | Git isolation | retained worktrees | REDESIGN | Worktree, clone, container copy, or abstraction? | Git/Sandbox |
 | Deterministic verification | repository checks | KEEP | How does each target repo declare verification? | Verification |
+| Independent model review | legacy managed review flow | REDESIGN/EXTERNALIZE | Is independent review needed in v0, and what provider-neutral read-only contract is sufficient? | Review |
 | Retry/fix loops | runner/review loop | REDESIGN | What bounded retry policy is sufficient? | Execution |
 | Human gates | explicit approvals | KEEP | Which operations require explicit authority? | Policy |
 | Secrets/credentials | runner-local auth/App tokens | REDESIGN | How to support local and server execution safely? | Credentials |
 | Forge authentication | GitHub-specific auth | REDESIGN | What generic forge interface and GitHub implementation? | Forge |
 | Branch/PR publication | publisher state machine | REDESIGN | What minimum safe publication contract is needed? | Forge |
-| Review ingestion | managed Codex workflow | EXTERNALIZE/REDESIGN | Is review a provider, forge signal, or optional workflow? | Review |
+| Review ingestion | legacy managed review flow | REDESIGN | Should findings be an optional workflow input, a forge signal, or both? | Review |
 | Observability/audit | logs/state/fingerprints | REDESIGN | Which events are actually needed for debugging/audit? | Observability |
 | Scheduling/webhooks | Actions/manual dispatch | REDESIGN | What belongs in v0 versus later server mode? | Server |
 | GitHub Projects | project state | EXTERNALIZE | Optional dashboard only? | Adapter |
 | GitHub Actions | CI/bridge | EXTERNALIZE | Keep only as project CI/integration option? | CI |
 | Local Mac runner | self-hosted execution host | DROP as dependency | Is any v0 capability genuinely macOS-specific? | Optional backend |
+
+## Review boundary
+
+Do not select or embed a concrete reviewer vendor during the architecture research phase.
+
+If independent model review is retained, preserve only the generic requirements:
+
+- deterministic verification precedes model review;
+- reviewer access is read-only by default;
+- input is bounded to relevant task/repository context and diff;
+- output is structured actionable findings;
+- findings do not directly mutate code or merge;
+- any correction is followed by deterministic verification;
+- review/correction loops are bounded;
+- provider-specific authentication, CLI configuration, quotas, and repository-local reviewer prompts belong outside the core architecture.
+
+A concrete project may dogfood any reviewer independently of Deep Dark Factory. That project-specific setup is not a dependency or default integration of this repository.
 
 ## Legacy concepts expected to survive
 
@@ -70,6 +88,7 @@ These are hypotheses to validate, not code to copy:
 - bounded agent/retry budget;
 - deterministic local verification;
 - explicit separation between execution and publication;
+- provider-neutral optional review/correction boundaries;
 - durable enough state to recover safely.
 
 ## Legacy implementation expected not to migrate directly
@@ -83,8 +102,8 @@ Audit before finalizing, but default to not carrying forward:
 - central `workspace.yaml` as a required project registry;
 - generated project index as runtime routing;
 - duplicate Markdown task state as an execution engine;
-- ChipIn-specific repository assumptions;
-- hard-coded agent/provider roles.
+- project-specific repository assumptions;
+- hard-coded agent/provider/reviewer roles.
 
 ## Required research output
 
@@ -97,11 +116,13 @@ Before creating the production source tree, Issue #1 should produce:
 5. persistence/checkpoint decision;
 6. sandbox decision;
 7. forge/provider interfaces;
-8. security and credential boundary;
-9. token/context budget model;
-10. one executable implementation plan for:
-   `Issue -> context -> isolated agent -> deterministic verify -> PR -> human merge`.
+8. decision on whether review is part of v0 or an optional later workflow;
+9. security and credential boundary;
+10. token/context budget model;
+11. one executable implementation plan for:
+   `Issue -> context -> isolated agent -> deterministic verify -> PR -> human merge`,
+   with optional review/correction only if research proves it belongs in v0.
 
 ## Stop condition
 
-Do not start a general-purpose workflow engine, distributed scheduler, UI, GitHub Projects integration, or Mac runner integration merely because it may be useful later. Add them only if the v0 vertical slice or evidence from research requires them.
+Do not start a general-purpose workflow engine, distributed scheduler, UI, GitHub Projects integration, concrete reviewer integration, or Mac runner integration merely because it may be useful later. Add them only if the v0 vertical slice or evidence from research requires them.
