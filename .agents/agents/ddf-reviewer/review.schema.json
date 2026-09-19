@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["findings"],
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "problem", "why_it_matters"],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["P0", "P1", "P2"]
+          },
+          "file": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "problem": {
+            "type": "string",
+            "minLength": 1
+          },
+          "why_it_matters": {
+            "type": "string",
+            "minLength": 1
+          },
+          "suggested_fix": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
