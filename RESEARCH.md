@@ -46,17 +46,56 @@ Every legacy capability or proposed subsystem receives one disposition:
 | Sandboxing | macOS/Codex boundary | REDESIGN | Local process, container, or library primitives? | Sandbox |
 | Git isolation | retained worktrees | REDESIGN | Worktree, clone, container copy, or abstraction? | Git/Sandbox |
 | Deterministic verification | repository checks | KEEP | How does each target repo declare verification? | Verification |
+| Independent model review | managed Codex workflow | REDESIGN/EXTERNALIZE | What minimal read-only reviewer contract works across local CLIs, hosted reviewers, and APIs? | Review |
 | Retry/fix loops | runner/review loop | REDESIGN | What bounded retry policy is sufficient? | Execution |
 | Human gates | explicit approvals | KEEP | Which operations require explicit authority? | Policy |
 | Secrets/credentials | runner-local auth/App tokens | REDESIGN | How to support local and server execution safely? | Credentials |
 | Forge authentication | GitHub-specific auth | REDESIGN | What generic forge interface and GitHub implementation? | Forge |
 | Branch/PR publication | publisher state machine | REDESIGN | What minimum safe publication contract is needed? | Forge |
-| Review ingestion | managed Codex workflow | EXTERNALIZE/REDESIGN | Is review a provider, forge signal, or optional workflow? | Review |
+| Review ingestion | managed Codex workflow | REDESIGN | How are structured findings accepted without giving the reviewer write authority? | Review |
 | Observability/audit | logs/state/fingerprints | REDESIGN | Which events are actually needed for debugging/audit? | Observability |
 | Scheduling/webhooks | Actions/manual dispatch | REDESIGN | What belongs in v0 versus later server mode? | Server |
 | GitHub Projects | project state | EXTERNALIZE | Optional dashboard only? | Adapter |
 | GitHub Actions | CI/bridge | EXTERNALIZE | Keep only as project CI/integration option? | CI |
 | Local Mac runner | self-hosted execution host | DROP as dependency | Is any v0 capability genuinely macOS-specific? | Optional backend |
+
+## Reviewer dogfood decision
+
+For the first real workflow, use Google Antigravity CLI as an experimental independent reviewer after deterministic verification and before PR publication.
+
+Reasons:
+
+- it supports Google OAuth for local CLI authentication;
+- Google AI Pro provides higher Antigravity usage limits, allowing the existing subscription to be used without making paid API usage a product requirement;
+- Google's documented code-review workflow demonstrates diff-scoped, read-only reviewing;
+- it gives provider diversity when the implementation agent is Codex/OpenAI;
+- it can be replaced later because only the generic structured-finding contract is part of the core architecture.
+
+Do not implement the reviewer as a GitHub Action with a repository `GEMINI_API_KEY` during the research phase. Google's automated Antigravity SDK example uses an API key (or Vertex credentials), which creates a different credential/billing path and would couple the initial design to GitHub Actions.
+
+Do not use Jules as the default independent reviewer for this role. Jules remains a useful coding/task agent, but the first reviewer requirement is specifically read-only diff analysis with no code mutation.
+
+Target dogfood flow:
+
+```text
+Issue/spec
+  -> implementation agent
+  -> deterministic verification
+  -> Antigravity read-only diff review
+  -> P0/P1?
+       yes -> implementation agent correction -> deterministic verification
+       no  -> continue
+  -> publish PR
+  -> human merge
+```
+
+Default v0 budget: one independent review and at most one correction pass.
+
+Official references checked during this research:
+
+- Google AI Pro benefits / Antigravity quota: https://support.google.com/googleone/answer/14534406
+- Antigravity CLI OAuth example: https://codelabs.developers.google.com/sdd-agy-cli
+- Antigravity code-review CLI/SDK example: https://codelabs.developers.google.com/agy-cli-sdk-code-review
 
 ## Legacy concepts expected to survive
 
@@ -69,7 +108,8 @@ These are hypotheses to validate, not code to copy:
 - bounded context;
 - bounded agent/retry budget;
 - deterministic local verification;
-- explicit separation between execution and publication;
+- independent read-only model review;
+- explicit separation between execution, review, correction, and publication;
 - durable enough state to recover safely.
 
 ## Legacy implementation expected not to migrate directly
@@ -96,11 +136,11 @@ Before creating the production source tree, Issue #1 should produce:
 4. dependency decisions with alternatives considered;
 5. persistence/checkpoint decision;
 6. sandbox decision;
-7. forge/provider interfaces;
+7. forge/provider/reviewer interfaces;
 8. security and credential boundary;
-9. token/context budget model;
+9. token/context/review budget model;
 10. one executable implementation plan for:
-   `Issue -> context -> isolated agent -> deterministic verify -> PR -> human merge`.
+   `Issue -> context -> isolated agent -> deterministic verify -> independent review -> bounded correction -> PR -> human merge`.
 
 ## Stop condition
 
