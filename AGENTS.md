@@ -28,6 +28,16 @@ Do not infer current architecture from historical conversations or from the lega
 - Minimize loaded context and repeated model work.
 - Never commit credentials, tokens, private keys, environment secrets, or authentication material.
 
+## Branching model
+
+Use the following branch roles consistently:
+
+- `dungeon-master` — production branch.
+- `master` — staging/integration branch.
+- `slave/<feature>` — agent development branches. Use a short kebab-case feature/task slug after `slave/`.
+
+Agent work must branch from the appropriate staging baseline and target `master` through a pull request unless an explicit task says otherwise. Do not merge agent work directly into `dungeon-master`.
+
 ## Reuse rule
 
 Before implementing a generic infrastructure primitive, research maintained open-source libraries/projects that already solve it. Prefer a small dependency or adapter when that reduces owned infrastructure without creating unacceptable lock-in.
@@ -39,3 +49,7 @@ Researching an existing project does not imply adopting or copying it.
 Keep architecture decisions explicit and small. Avoid creating directories, abstractions, services, or configuration formats speculatively.
 
 During the research phase, substantive work should update the research/architecture documents and reference the governing Issue. Merge remains human-only.
+
+## Naming note
+
+The project name has an internal gachi reference. Keep that reference internal to agent/project context; do not mention or explain it in the README or other user-facing documentation.
