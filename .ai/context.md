@@ -23,7 +23,14 @@ Build a universal open-source dark software factory for software engineering. It
 - No architectural dependency on the existing local MacBook runner.
 - No architectural dependency on GitHub Actions for product execution.
 - Agent/model providers must be replaceable.
-- Deterministic verification should precede model-based review.
+- Deterministic verification must precede model-based review and correction.
+- Independent model review is a read-only, replaceable policy stage; reviewers do not edit code, publish, merge, or mutate task state.
+- The first dogfood reviewer is Google Antigravity CLI using Google OAuth so the existing Google AI Pro Antigravity quota can be used without requiring a repository API secret.
+- Reviewer output uses structured P0/P1/P2 findings; P0/P1 block publication unless corrected or explicitly overridden by a human policy decision.
+- Corrections are performed by the execution agent, followed by deterministic verification again.
+- v0 defaults to one independent review and at most one correction pass.
+- The Antigravity choice is an adapter/dogfood decision, not a core dependency; other reviewer providers must remain interchangeable.
+- Do not introduce a GitHub Action + `GEMINI_API_KEY` reviewer during the research phase.
 - Minimize token consumption through bounded/lazy context, minimal agent calls, and bounded correction loops.
 - Reuse mature generic open-source primitives when appropriate instead of rebuilding infrastructure by default.
 - Branch roles are fixed as follows: `dungeon-master` is production, `master` is staging/integration, and agent development branches use `slave/<feature>`.
@@ -50,6 +57,8 @@ GitHub Issue
 -> relevant repository context
 -> isolated agent execution
 -> deterministic verification
+-> independent read-only review
+-> optional bounded correction + re-verification
 -> safe branch/PR publication
 -> human merge
 ```
