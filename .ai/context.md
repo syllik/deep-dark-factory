@@ -26,6 +26,12 @@ Build a universal open-source dark software factory for software engineering. It
 - Deterministic verification should precede model-based review.
 - Minimize token consumption through bounded/lazy context, minimal agent calls, and bounded correction loops.
 - Reuse mature generic open-source primitives when appropriate instead of rebuilding infrastructure by default.
+- Branch roles are fixed as follows: `dungeon-master` is production, `master` is staging/integration, and agent development branches use `slave/<feature>`.
+- Agent changes should reach `master` through pull requests; `dungeon-master` is not a direct agent-development target.
+
+## Internal naming note
+
+Deep Dark Factory is an internal gachi reference. Do not mention or explain that reference in the README or other user-facing documentation.
 
 ## Legacy sources to audit
 
