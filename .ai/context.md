@@ -23,7 +23,10 @@ Build a universal open-source dark software factory for software engineering. It
 - No architectural dependency on the existing local MacBook runner.
 - No architectural dependency on GitHub Actions for product execution.
 - Agent/model providers must be replaceable.
-- Deterministic verification should precede model-based review.
+- Deterministic verification should precede any model-based review or correction.
+- No concrete reviewer provider is selected or embedded in the core architecture.
+- Independent model review, if retained, is an optional provider-neutral workflow stage with read-only access by default, bounded context, structured findings, and bounded correction loops.
+- Provider-specific reviewer setup, authentication, prompts, quotas, and project-local configuration stay outside the core unless a future explicit architecture decision says otherwise.
 - Minimize token consumption through bounded/lazy context, minimal agent calls, and bounded correction loops.
 - Reuse mature generic open-source primitives when appropriate instead of rebuilding infrastructure by default.
 - Branch roles are fixed as follows: `dungeon-master` is production, `master` is staging/integration, and agent development branches use `slave/<feature>`.
@@ -53,5 +56,7 @@ GitHub Issue
 -> safe branch/PR publication
 -> human merge
 ```
+
+Independent model review remains an optional boundary to evaluate during Issue #1; it is not tied to any concrete provider.
 
 No production source-tree architecture is considered settled until that research is complete.
