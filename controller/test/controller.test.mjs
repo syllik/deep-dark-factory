@@ -20,7 +20,7 @@ function spec(overrides={}) {
   };
 }
 const admission=(task)=>({contractVersion:'task-admission/v1',status:'ADMITTED',issue:task.id,revision:'d'.repeat(64),checkedAt:new Date().toISOString(),blockers:[]});
-function rig({admissionReader=admission,invoke,backend,ciReader,reviewer,publisher,paidGrantReader,capabilityReader}={}) {
+function rig({admissionReader=admission,invoke,backend,ciReader,reviewer,publisher,paidGrantReader,capabilityReader,approvalReader,correctionGrantReader}={}) {
   const models = new AgentRuntime({mock:{accepted:true,roles:['Executor'],offlineOnly:true,invoke:invoke||((x)=>({
     version:'ddf.result/v1',taskId,invocationId:x.invocationId,role:x.role,status:'completed',usageMicros:null
   }))}});
@@ -39,7 +39,7 @@ function rig({admissionReader=admission,invoke,backend,ciReader,reviewer,publish
   };
   return {
     store:null,
-    options:{admissionReader,paidGrantReader,capabilityReader,backend:backend||new OfflineBackend(models),
+    options:{admissionReader,approvalReader,correctionGrantReader,paidGrantReader,capabilityReader,backend:backend||new OfflineBackend(models),
       verifier:async s=>({status:'passed',baseSha:s.task.baseSha,changedPaths:['src/a.mjs'],diffDigest:'e'.repeat(64)}),
       publisher:trustedPublisher,
       ciReader:ciReader|| (async pub=>({status:'green',headSha:pub.headSha,requiredChecksPassed:true})),
@@ -233,6 +233,9 @@ test('Codex, Claude and local endpoint require three independent capability acce
     paidAuthorization:true,authorizationRef:'human:exact-numeric-grant'}});
   for(const provider of ['codex','claude','local']) {
     const {controller:c,store}=await setup(t,{
+      approvalReader:async task=>({status:'APPROVED',taskId:task.id,
+        approvalRef:'human:approved',policySha,baseSha,publication:'allowed',humanMerge:true,
+        maxCorrections:2,maxFallbacks:1,allowedPaths:['src/a.mjs'],checkedAt:new Date().toISOString()}),
       paidGrantReader:async task=>({status:'APPROVED',taskId:task.id,
         authorizationRef:'human:exact-numeric-grant',capMicros:400,maxCalls:1,maxCanaries:1,
         checkedAt:new Date().toISOString(),allowedProviders:[provider]}),
@@ -273,4 +276,22 @@ test('fresh canonical admission revision drift prevents invocation and resume',a
   await assert.rejects(execute(c),/admission revision drift/);
   await assert.rejects(c.initialize(spec()),/admission revision drift/);
   assert.equal((await store.read(taskId)).ledger.calls,0);
+});
+
+test('a JobSpec approvalRef never substitutes a trusted human grant',async t=>{
+  const live=spec({mode:'live',budget:{capMicros:400,maxCalls:1,maxCanaries:1,
+    paidAuthorization:true,authorizationRef:'human:exact-numeric-grant'}});
+  const {controller:c}=await setup(t,{paidGrantReader:async()=>({status:'APPROVED'})});
+  await assert.rejects(c.initialize(live),/trusted human task approval reader required/);
+});
+
+test('stale trusted task authority blocks live initialization',async t=>{
+  const live=spec({mode:'live',budget:{capMicros:400,maxCalls:1,maxCanaries:1,
+    paidAuthorization:true,authorizationRef:'human:exact-numeric-grant'}});
+  const {controller:c}=await setup(t,{approvalReader:async task=>({
+    status:'APPROVED',taskId:task.id,approvalRef:'human:approved',policySha,baseSha,
+    publication:'allowed',humanMerge:true,maxCorrections:2,maxFallbacks:1,
+    allowedPaths:['src/a.mjs'],checkedAt:'2020-01-01T00:00:00Z'
+  })});
+  await assert.rejects(c.initialize(live),/human authority missing or stale/);
 });
