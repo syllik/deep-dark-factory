@@ -25,7 +25,7 @@ export class Controller {
         authority.allowedPaths.length === spec.policy.allowedPaths.length &&
         authority.allowedPaths.every(p => spec.policy.allowedPaths.includes(p)) &&
         Number.isFinite(grantedAt) && grantedAt <= Date.now() && Date.now()-grantedAt <= 120000,
-        'trusted exact task-v2 human authority missing or stale');
+        'trusted exact DDF task-policy grant missing or stale');
       assert(typeof this.paidGrantReader === 'function','trusted external paid-grant reader required');
       const grant = await this.paidGrantReader(spec.task);
       assert(grant?.status === 'APPROVED' && grant.taskId === spec.task.id &&
