@@ -26,14 +26,14 @@ export class Controller {
   }
   async initialize(input) {
     const spec = validateJobSpec(input);
-    await this.gate(spec);
+    const admissionRevision = await this.gate(spec);
     return this.store.withTask(spec.task.id,async (get,save) => {
       const current = get();
       if (current) {
         assert(current.specDigest === digest(spec),'immutable JobSpec drift');
         return current;
       }
-      const state = {version:'ddf.state/v1',taskId:spec.task.id,spec,specDigest:digest(spec),
+      const state = {version:'ddf.state/v1',taskId:spec.task.id,spec,specDigest:digest(spec),admissionRevision,
         phase:'ADMITTED',ledger:{reservedMicros:0,chargedMicros:0,calls:0,unknownCalls:0},
         invocations:[],corrections:0,reviewBySha:{},publication:null,publicationHistory:[],
         verified:null,ci:null,ready:false,readyIntent:null};
@@ -44,7 +44,7 @@ export class Controller {
     return this.store.withTask(taskId,async(get,save) => {
       const state = get();
       assert(state && !['BLOCKED_UNCERTAIN','READY_PR'].includes(state.phase),'task absent or blocked');
-      await this.gate(state.spec,provider);
+      assert((await this.gate(state.spec,provider))===state.admissionRevision,'admission revision drift');
       assert(['implementation','fallback','correction'].includes(kind),'unsupported invocation kind');
       if (kind === 'implementation') {
         assert(role === 'Executor' && state.phase === 'ADMITTED' && !state.invocations.length,'one initial Executor only');
@@ -138,7 +138,7 @@ export class Controller {
   async verify(taskId) {
     return this.store.withTask(taskId,async(get,save)=>{
       const s=get();assert(s?.phase==='EXECUTED','completed execution required');
-      await this.gate(s.spec);
+      assert((await this.gate(s.spec))===s.admissionRevision,'admission revision drift');
       assert(typeof this.verifier==='function','trusted deterministic verifier required');
       const receipt=await this.verifier(s.spec);
       assert(receipt?.status==='passed' && SHA.test(receipt.baseSha||'') &&
@@ -157,7 +157,7 @@ export class Controller {
   async publish(taskId) {
     return this.store.withTask(taskId,async(get,save)=>{
       const s=get();assert(s?.phase==='VERIFIED' && !s.publication,'verified un-published revision required');
-      await this.gate(s.spec);
+      assert((await this.gate(s.spec))===s.admissionRevision,'admission revision drift');
       assert(typeof this.publisher?.publish==='function','trusted publisher required');
       if(s.spec.mode==='offline') assert(this.publisher.mock===true,'offline forbids real publication');
       const key=digest({taskId,verifiedDigest:digest(s.verified),branch:s.spec.task.branch});
@@ -181,7 +181,7 @@ export class Controller {
   async requestReview(taskId) {
     return this.store.withTask(taskId,async(get,save)=>{
       const s=get();assert(s?.phase==='PUBLISHED','published PR required for review');
-      await this.gate(s.spec);
+      assert((await this.gate(s.spec))===s.admissionRevision,'admission revision drift');
       const sha=s.publication.receipt.headSha;
       assert(!s.reviewBySha[sha],'review already requested for exact SHA');
       const ci=await this.ciReader(s.publication.receipt);
@@ -212,7 +212,7 @@ export class Controller {
   async markReady(taskId) {
     return this.store.withTask(taskId,async(get,save)=>{
       const s=get();assert(s?.phase==='REVIEWED','independent review pass required');
-      await this.gate(s.spec);
+      assert((await this.gate(s.spec))===s.admissionRevision,'admission revision drift');
       const head=s.publication.receipt.headSha;
       assert(s.reviewBySha[head]?.status==='pass' && s.ci?.headSha===head,'review/CI SHA mismatch');
       const ci=await this.ciReader(s.publication.receipt);
