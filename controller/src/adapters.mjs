@@ -1,6 +1,17 @@
 import { assert, ROLES } from './contracts.mjs';
 
 // ModelProvider owns protocol/usage. AgentRuntime owns role routing. Neither owns publication.
+
+// Explicit provider protocol; vendors remain adapter implementations, never roles.
+export class ModelProvider {
+  constructor({id,roles,accepted=false,offlineOnly=false}) {
+    assert(typeof id==='string' && id.length>0,'provider id required');
+    assert(Array.isArray(roles) && roles.every(role=>ROLES.includes(role)),'provider roles invalid');
+    Object.assign(this,{id,roles,accepted,offlineOnly});
+  }
+  async invoke(_request) { throw new Error('ModelProvider.invoke must be implemented by an adapter'); }
+}
+
 export class AgentRuntime {
   constructor(providers) { this.providers = providers; }
   async invoke({provider, role, payload, invocationId, mode}) {
