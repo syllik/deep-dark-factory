@@ -5,13 +5,14 @@ import { Controller } from '../src/controller.mjs';
 import { FileStateStore } from '../src/store.mjs';
 import { AgentRuntime, OfflineBackend } from '../src/adapters.mjs';
 import { digest } from '../src/contracts.mjs';
+import { ManualTaskSource } from '../src/task-source.mjs';
 
-const id='syllik/deep-dark-factory#8';
+const id='demo:portable-task-8';
 const spec={
   version:'ddf.jobspec/v1',mode:'offline',contextBytes:1024,
-  task:{id,repository:'syllik/deep-dark-factory',issueNumber:8,
-    branch:'slave/issue-8-controller-v0',integrationBranch:'master',baseSha:'b'.repeat(40)},
-  policy:{contractVersion:2,approvalRef:'DEMO_ONLY',sha:'a'.repeat(40),
+  task:{id,projectId:'my-project',source:{kind:'manual',ref:'first-task'},
+    branch:'work/first-task',integrationBranch:'trunk',baseSha:'b'.repeat(40)},
+  policy:{contractVersion:'ddf.policy/v1',approvalRef:'DEMO_ONLY',sha:'a'.repeat(40),
     allowedPaths:['example.txt'],publication:'allowed',humanMerge:true,maxCorrections:2,maxFallbacks:1},
   budget:{capMicros:1000,maxCalls:3}
 };
@@ -23,14 +24,17 @@ try {
   const pub={
     mock:true,
     publish:async({verified,key})=>({key,verifiedDigest:digest(verified),headSha:'c'.repeat(40),
-      branch:spec.task.branch,base:'master',pr:999,commitCount:1,pushCount:1,
+      branch:spec.task.branch,base:'trunk',pr:999,commitCount:1,pushCount:1,
       forcePush:false,historyRewrite:false,humanMerge:true}),
     markReady:async i=>({headSha:i.headSha,draft:false,humanMerge:true})
   };
+  const source=new ManualTaskSource([{
+    id,projectId:spec.task.projectId,source:spec.task.source,
+    baseSha:spec.task.baseSha,policySha:spec.policy.sha,admitted:true
+  }]);
   const controller=new Controller({
     store:new FileStateStore(dir),
-    admissionReader:async()=>({contractVersion:'task-admission/v1',status:'ADMITTED',
-      issue:id,revision:'d'.repeat(64),checkedAt:new Date().toISOString(),blockers:[]}),
+    admissionReader:task=>source.readAdmission(task,spec.policy.sha),
     backend:new OfflineBackend(runtime),
     verifier:async()=>({status:'passed',baseSha:spec.task.baseSha,
       diffDigest:'e'.repeat(64),changedPaths:['example.txt']}),
