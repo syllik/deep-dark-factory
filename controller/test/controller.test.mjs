@@ -227,3 +227,40 @@ test('provider/backend ports stay separate, and executor env excludes tokens',as
   assert.throws(()=>validateResult({version:'ddf.result/v1',taskId,role:'Executor',invocationId:'a',status:'completed'},
     {taskId,role:'Executor',invocationId:'a'}),/usage/);
 });
+
+test('Codex, Claude and local endpoint require three independent capability acceptances',async t=>{
+  const live=spec({mode:'live',budget:{capMicros:400,maxCalls:1,maxCanaries:1,
+    paidAuthorization:true,authorizationRef:'human:exact-numeric-grant'}});
+  for(const provider of ['codex','claude','local']) {
+    const {controller:c,store}=await setup(t,{
+      paidGrantReader:async task=>({status:'APPROVED',taskId:task.id,
+        authorizationRef:'human:exact-numeric-grant',capMicros:400,maxCalls:1,maxCanaries:1,
+        checkedAt:new Date().toISOString(),allowedProviders:[provider]}),
+      capabilityReader:async name=>({provider:name,status:'PENDING',secretIsolation:false,
+        usageAccounting:false,idempotency:false,sandbox:false})
+    });
+    const name=live.task.id;
+    await c.initialize(live);
+    await assert.rejects(c.invoke({taskId:name,role:'Executor',provider,maxReserveMicros:150}),/capability acceptance pending/);
+    assert.equal((await store.read(name)).ledger.calls,0);
+  }
+});
+
+test('known usage above reserved ceiling blocks without allowing replay',async t=>{
+  const {controller:c,store}=await setup(t,{invoke:x=>({
+    version:'ddf.result/v1',taskId,role:x.role,invocationId:x.invocationId,status:'completed',usageMicros:300
+  })});
+  await c.initialize(spec());
+  const call=await execute(c);
+  assert.equal(call.phase,'BLOCKED_UNCERTAIN');
+  assert.equal((await store.read(taskId)).ledger.chargedMicros,300);
+  await assert.rejects(execute(c),/blocked/);
+});
+
+test('ModelProvider is a distinct executable protocol with no inherited publisher authority',async()=>{
+  const {ModelProvider}=await import('../src/adapters.mjs');
+  const model=new ModelProvider({id:'example',roles:['Executor'],accepted:false});
+  await assert.rejects(model.invoke({}),/must be implemented/);
+  assert.equal('publisher' in model,false);
+  assert.throws(()=>new ModelProvider({id:'bad',roles:['Publisher']}),/provider roles/);
+});
