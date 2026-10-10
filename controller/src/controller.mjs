@@ -5,13 +5,27 @@ const SHA = /^[0-9a-f]{40}$/;
 
 /** Core orchestration only: accepts trusted adapter ports, never holds publication credentials. */
 export class Controller {
-  constructor({store,admissionReader,paidGrantReader,capabilityReader,backend,verifier,publisher,ciReader,reviewer}) {
-    Object.assign(this,{store,admissionReader,paidGrantReader,capabilityReader,backend,verifier,publisher,ciReader,reviewer});
+  constructor({store,admissionReader,approvalReader,correctionGrantReader,paidGrantReader,capabilityReader,backend,verifier,publisher,ciReader,reviewer}) {
+    Object.assign(this,{store,admissionReader,approvalReader,correctionGrantReader,paidGrantReader,capabilityReader,backend,verifier,publisher,ciReader,reviewer});
   }
   async gate(spec, provider=null) {
     assert(typeof this.admissionReader === 'function','trusted fresh admission reader required');
     const revision = assertFreshAdmission(await this.admissionReader(spec.task),spec);
     if (spec.mode === 'live') {
+      assert(typeof this.approvalReader === 'function','trusted human task approval reader required');
+      const authority = await this.approvalReader(spec.task);
+      const grantedAt = Date.parse(authority?.checkedAt);
+      assert(authority?.status === 'APPROVED' && authority.taskId === spec.task.id &&
+        authority.approvalRef === spec.policy.approvalRef &&
+        authority.policySha === spec.policy.sha && authority.baseSha === spec.task.baseSha &&
+        authority.publication === 'allowed' && authority.humanMerge === true &&
+        authority.maxCorrections === spec.policy.maxCorrections &&
+        authority.maxFallbacks === spec.policy.maxFallbacks &&
+        Array.isArray(authority.allowedPaths) &&
+        authority.allowedPaths.length === spec.policy.allowedPaths.length &&
+        authority.allowedPaths.every(p => spec.policy.allowedPaths.includes(p)) &&
+        Number.isFinite(grantedAt) && grantedAt <= Date.now() && Date.now()-grantedAt <= 120000,
+        'trusted exact task-v2 human authority missing or stale');
       assert(typeof this.paidGrantReader === 'function','trusted external paid-grant reader required');
       const grant = await this.paidGrantReader(spec.task);
       assert(grant?.status === 'APPROVED' && grant.taskId === spec.task.id &&
@@ -61,6 +75,16 @@ export class Controller {
         assert(authorization?.headSha === publishedSha && !!authorization.reference &&
           authorization.findingsPackageCount === 1 &&
           state.reviewBySha[publishedSha]?.status === 'findings','current-head authorized consolidated correction required');
+        if (state.spec.mode === 'live') {
+          assert(typeof this.correctionGrantReader === 'function','trusted correction grant reader required');
+          const grant = await this.correctionGrantReader(state.spec.task);
+          const at = Date.parse(grant?.checkedAt);
+          assert(grant?.status === 'APPROVED' && grant.taskId === taskId &&
+            grant.reference === authorization.reference && grant.headSha === publishedSha &&
+            grant.findingsPackageCount === 1 && grant.batch === state.corrections+1 &&
+            Number.isFinite(at) && at <= Date.now() && Date.now()-at <= 120000,
+            'current-head authorized correction batch not confirmed');
+        }
       }
       assert(state.invocations.every(i=>!['RESERVED','PENDING'].includes(i.status)),'uncertain invocation requires recovery');
       assert(validMoney(maxReserveMicros),'nonzero pre-invocation reservation required');
