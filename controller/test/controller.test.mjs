@@ -208,7 +208,7 @@ test('publication holds durable intent, only lookup can resolve ambiguous push',
   await c.initialize(spec());await execute(c);await c.verify(scopedKey);
   await assert.rejects(c.publish(scopedKey),/uncertain/);
   assert.equal((await store.read(scopedKey)).publication.status,'PENDING');
-  const recovered=await c.reconcilePublication(taskId);
+  const recovered=await c.reconcilePublication(scopedKey);
   assert.equal(recovered.changeRef.id,'sample-mr-10');
   await assert.rejects(c.publish(scopedKey),/un-published/);
 });
@@ -217,7 +217,7 @@ test('review deduplicated on actually published SHA; CI must be green',async t=>
   const {controller:c}=await setup(t);
   await published(c);
   await c.requestReview(scopedKey,{provider:'mock',maxReserveMicros:100});
-  await assert.rejects(c.requestReview(scopedKey,{provider:'mock',maxReserveMicros:100}),/published PR required|already requested/);
+  await assert.rejects(c.requestReview(scopedKey,{provider:'mock',maxReserveMicros:100}),/published change required|already requested/);
   const {controller:other}=await setup(t,{ciReader:async()=>({status:'green',headSha:'f'.repeat(40),requiredChecksPassed:true})});
   await published(other);
   await assert.rejects(other.requestReview(scopedKey,{provider:'mock',maxReserveMicros:100}),/current published SHA/);
@@ -410,6 +410,7 @@ test('AUDIT: pending review callback settles once, conflicting callback rejected
   const pending=await c.requestReview(scopedKey,{provider:'mock',maxReserveMicros:100});
   assert.equal((await store.read(scopedKey)).ledger.reservedMicros,100);
   const final={...pending,status:'pass',usageMicros:null};
+  assert.equal((await c.recover(scopedKey)).phase,'BLOCKED_UNCERTAIN');
   await c.receiveReview(scopedKey,final);
   assert.equal((await store.read(scopedKey)).ledger.chargedMicros,350);
   assert.equal((await c.receiveReview(scopedKey,final)).kind,'already-reviewed');
@@ -440,4 +441,37 @@ test('AUDIT: live review provider must pass trusted paid grant and own acceptanc
   const s=await c.store.read(scopedKey);
   await assert.rejects(c._reservePaid(s,{role:'Reviewer',kind:'review',provider:'review-model',maxReserveMicros:100}),/provider not allowed/);
   assert.equal(s.ledger.calls,0);
+});
+
+test('AUDIT: source-ref namespace isolates identical ids within one project',async t=>{
+  const {controller:c,store}=await setup(t);
+  const a=spec(),b=spec({task:{...a.task,source:{kind:'manual',ref:'other-manifest-task'}}});
+  assert.notEqual(taskKey(a.task),taskKey(b.task));
+  await c.initialize(a);await c.initialize(b);
+  assert.equal((await store.read(taskKey(a.task))).spec.task.source.ref,'task-8');
+  assert.equal((await store.read(taskKey(b.task))).spec.task.source.ref,'other-manifest-task');
+});
+
+test('AUDIT: project namespace isolates identical ids and identical sources',async t=>{
+  const {controller:c,store}=await setup(t);
+  const a=spec(),b=spec({task:{...a.task,projectId:'second-project'}});
+  assert.notEqual(taskKey(a.task),taskKey(b.task));
+  await c.initialize(a);await c.initialize(b);
+  assert.equal((await store.read(taskKey(b.task))).ledger.calls,0);
+});
+
+test('AUDIT: cross-project paid grant cannot authorize same local id',async t=>{
+  const old=spec();
+  const live=spec({mode:'live',task:{...old.task,projectId:'second-project'},
+    budget:{capMicros:400,maxCalls:1,maxCanaries:1,paidAuthorization:true,authorizationRef:'grant'}});
+  const {controller:c}=await setup(t,{
+    approvalReader:async task=>({status:'APPROVED',taskId:task.id,taskKey:taskKey(old.task),
+      approvalRef:'human:approved',policySha,baseSha,publication:'allowed',humanMerge:true,
+      maxCorrections:2,maxFallbacks:1,allowedPaths:['src/a.mjs'],checkedAt:new Date().toISOString()}),
+    paidGrantReader:async task=>({status:'APPROVED',taskId:task.id,taskKey:taskKey(old.task),
+      authorizationRef:'grant',capMicros:400,maxCalls:1,maxCanaries:1,
+      allowedProviders:['mock'],checkedAt:new Date().toISOString()})
+  });
+  await assert.rejects(c.initialize(live),/task-policy grant/);
+  assert.equal(await c.store.read(taskKey(live.task)),null);
 });
