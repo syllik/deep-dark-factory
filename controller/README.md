@@ -1,6 +1,6 @@
 # DDF Issue → ready PR Controller (offline reference)
 
-**Status: unmerged draft / offline only / zero real provider calls / zero GitHub writes.** This is DDF-owned code, proposed after research PR #7. Its use of fake admission, CI, review and publisher receipts in tests/demo is not evidence of acceptance of a real Issue → ready PR cycle.
+**Status: unmerged draft / offline only / zero real provider calls / zero forge writes.** This is DDF-owned code, proposed after research PR #7. Its use of fake admission, CI, review and publisher receipts in tests/demo is not evidence of acceptance of a real Issue → ready PR cycle.
 
 Prerequisites: Node.js 22+ (DDF target pin 24.21.0). No npm dependencies.
 
@@ -16,7 +16,7 @@ The demo intentionally prints `READY_PR_SIMULATED`, not a real PR URL.
 
 - `ddf.jobspec/v1`: exact task/Issue, pinned policy/base, v2 human grant, bounded context (32768 UTF-8 bytes), task-wide micro-USD cap and max calls, human merge.
 - `ddf.result/v1`: invocation identity, role, state, nullable usage; unknown usage is conservatively charged to the full reservation.
-- The injected `admissionReader` must perform a **fresh canonical read-back**. ChipIn requires org #53 `chipin-issue-admission/v1`, including mandatory FE/BE assignee and Project #5. Generic forges use a separate `task-admission/v1`; neither is accepted from untrusted Issue text.
+- The injected `admissionReader` must return a fresh DDF-native `ddf.admission/v1` receipt bound to opaque task ID, project ID and revision. A built-in operator-owned `ManualTaskSource` admits local tasks without GitHub or any other repository. Optional forge adapters may impose their own project-specific rules, never as core requirements.
 - ModelProvider controls model protocol; AgentRuntime binds it to provider-independent Planner/Architect/Executor/Reviewer/Auditor roles; RunnerBackend is transport (Actions, dedicated machine, local endpoint). Separate trusted Publisher owns all Git/PR mutation credentials.
 - Local atomic store supports **one host only**; it cannot be shared among ephemeral GitHub Actions jobs. A real Actions backend requires ACID external storage, task-level uniqueness, transactionally reserved invocation intent, worker fencing and callback authenticity before any model is invoked.
 - Core never merges, closes Issues, deploys, rewrites branch history or changes Project Status.
@@ -37,4 +37,4 @@ No deployed Codex/Claude/local adapter is accepted. They require independent cap
 
 See `ACCEPTANCE.md`. This branch intentionally contains no live adapter activation and no secrets.
 
-**Additional live authority boundary:** a trusted external task-v2 `approvalReader` must confirm task identity, policy/base SHA, exact allowed paths and publication/fallback/correction limits at every stage. Each correction additionally requires a fresh trusted head- and batch-bound `correctionGrantReader`. An `approvalRef` or correction reference supplied in JobSpec/payload is never sufficient.
+**Additional live authority boundary:** a DDF-trusted `approvalReader` must confirm task identity, DDF policy/base SHA, exact allowed paths and publication/fallback/correction limits at every stage. Each correction additionally requires a fresh trusted head- and batch-bound `correctionGrantReader`. An `approvalRef` or correction reference supplied in JobSpec/payload is never sufficient.
