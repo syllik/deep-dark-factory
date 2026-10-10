@@ -136,3 +136,8 @@ Issue #1 must determine, rather than assume:
 - secret handling;
 - server/webhook architecture;
 - observability format.
+
+
+## Proposed v0 implementation decision (2026-10-10)
+
+The concrete provider-neutral controller contract, role/runtime/backend split, TaskSource and trusted Publisher boundaries, chosen offline/live persistence strategies, Actions-first deployment model, acceptance gates and deferred edge decisions are detailed in [docs/controller-v0-decision.md](docs/controller-v0-decision.md). This is a **research-gate proposal**, not deployed implementation or evidence that Issue #1 is closed. Until human acceptance, production engine code is not authorized by this repository's `AGENTS.md`.
