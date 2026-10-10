@@ -31,6 +31,7 @@ export class Controller {
       const current = get();
       if (current) {
         assert(current.specDigest === digest(spec),'immutable JobSpec drift');
+        assert(current.admissionRevision === admissionRevision,'admission revision drift on resume');
         return current;
       }
       const state = {version:'ddf.state/v1',taskId:spec.task.id,spec,specDigest:digest(spec),admissionRevision,
