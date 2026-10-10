@@ -4,7 +4,7 @@ Primary tracker: [Issue #1 — Define v0 architecture and migration boundary](ht
 
 ## Purpose
 
-Determine the smallest architecture required for the v0 vertical slice before production implementation begins.
+Determine the smallest **standalone** architecture required for the v0 vertical slice before production implementation begins. No runtime contract may refer to an external maintainer repository or policy.
 
 The research must distinguish reusable product concepts from legacy implementation complexity.
 
@@ -33,12 +33,12 @@ Every legacy capability or proposed subsystem receives one disposition:
 
 | Capability | Legacy source | Preliminary disposition | Research question | Target boundary |
 | --- | --- | --- | --- | --- |
-| Task ingestion | GitHub Issues / legacy queue logic | REDESIGN | What is the smallest forge-neutral task contract? | Task adapter |
+| Task ingestion | TaskSource and historical GitHub queue ideas | REDESIGN | What is the smallest forge-neutral task contract? | Task adapter |
 | Workflow graph/lifecycle | runner + documented workflow | REDESIGN | How little orchestration is required for v0? | Execution |
 | Persistent execution state | runner canonical state + task state files | REDESIGN | What must persist to resume safely? | Persistence |
 | Resume/checkpoints | runner recovery + task state | REDESIGN | Can a simple persisted run record cover v0? | Persistence |
 | Locking/concurrency | runner locks/reservations | REDESIGN | What is required for one-task v0 and later workers? | Execution |
-| Context discovery | ai-workflow + repo context | MOVE | How is relevant context found without a central registry? | Context |
+| Context discovery | local project context + historical references | REDESIGN | How is relevant context found without a central registry? | Context |
 | Context budget | ai-workflow/runner | KEEP | What hard limits and measurements are needed? | Context |
 | Token/agent-call budget | workflow conventions | KEEP | Which budgets are first-class run policy? | Policy |
 | Agent abstraction | legacy model roles | REDESIGN | What provider-neutral contract is sufficient? | Agent |
@@ -55,7 +55,7 @@ Every legacy capability or proposed subsystem receives one disposition:
 | Review ingestion | legacy managed review flow | REDESIGN | Should findings be an optional workflow input, a forge signal, or both? | Review |
 | Observability/audit | logs/state/fingerprints | REDESIGN | Which events are actually needed for debugging/audit? | Observability |
 | Scheduling/webhooks | Actions/manual dispatch | REDESIGN | What belongs in v0 versus later server mode? | Server |
-| GitHub Projects | project state | EXTERNALIZE | Optional dashboard only? | Adapter |
+| GitHub Projects | optional forge UI | EXTERNALIZE | Optional dashboard only? | Adapter |
 | GitHub Actions | CI/bridge | EXTERNALIZE | Keep only as project CI/integration option? | CI |
 | Local Mac runner | self-hosted execution host | DROP as dependency | Is any v0 capability genuinely macOS-specific? | Optional backend |
 
@@ -130,4 +130,4 @@ Do not start a general-purpose workflow engine, distributed scheduler, UI, GitHu
 
 ## Proposed v0 audit conclusion (2026-10-10)
 
-The complete capability-by-capability `KEEP/MOVE/REDESIGN/DROP/EXTERNALIZE` decision table, alternatives (Fabro, OpenHands, SWE-agent, LangGraph, Temporal), migration exclusions, selected Node 24 ESM offline stack, transactional live state requirement, backend/provider interfaces, and bounded Issue→ready PR acceptance path are recorded in [docs/controller-v0-decision.md](docs/controller-v0-decision.md). The earlier preliminary table above remains historical discovery, **not a permission to copy the legacy runner**. Status: **proposed, awaiting human acceptance of Issue #1**. No live or production implementation is claimed.
+The standalone product boundary and complete capability-by-capability `KEEP/MOVE/REDESIGN/DROP/EXTERNALIZE` decision table, alternatives (Fabro, OpenHands, SWE-agent, LangGraph, Temporal), migration exclusions, selected Node 24 ESM offline stack, transactional live state requirement, backend/provider interfaces, and bounded Issue→ready PR acceptance path are recorded in [docs/controller-v0-decision.md](docs/controller-v0-decision.md). The earlier preliminary table above remains historical discovery, **not a permission to copy the legacy runner**. Status: **proposed, awaiting human acceptance of Issue #1**. No live or production implementation is claimed.
