@@ -308,7 +308,7 @@ test('stale trusted task authority blocks live initialization',async t=>{
     publication:'allowed',humanMerge:true,maxCorrections:2,maxFallbacks:1,
     allowedPaths:['src/a.mjs'],checkedAt:'2020-01-01T00:00:00Z'
   })});
-  await assert.rejects(c.initialize(live),/human authority missing or stale/);
+  await assert.rejects(c.initialize(live),/DDF task-policy grant missing or stale/);
 });
 
 test('no user-specific repository or personal role schema is accepted as core policy',()=>{
@@ -323,4 +323,15 @@ test('no user-specific repository or personal role schema is accepted as core po
 test('admission is bound to project identity, not forge Issue labels or statuses',async t=>{
   const {controller:c}=await setup(t,{admissionReader:task=>({...admission(task),projectId:'other-project'})});
   await assert.rejects(c.initialize(spec()),/admission task\/project/);
+});
+
+test('standalone core never imports maintainer-specific repository contracts', async()=>{
+  const {readFile,readdir}=await import('node:fs/promises');
+  const {join}=await import('node:path');
+  const paths=(await readdir(join(process.cwd(),'src'))).filter(name=>name.endsWith('.mjs'));
+  for(const name of paths){
+    const source=await readFile(join(process.cwd(),'src',name),'utf8');
+    assert.doesNotMatch(source,/ChipIn-one|syllik\/ai-workflow|codex-local-runner|chipin-issue-admission|Project #5|org\/repo#issue/,
+      'vendor-specific runtime dependency found: '+name);
+  }
 });
