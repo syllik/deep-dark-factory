@@ -8,18 +8,18 @@ import { AgentRuntime, OfflineBackend, sanitizeExecutorEnv, ActionsBackend, Dedi
 import { FileStateStore } from '../src/store.mjs';
 import { validateJobSpec, validateResult, digest } from '../src/contracts.mjs';
 
-const taskId='syllik/deep-dark-factory#8';
+const taskId='standalone:task-8';
 const baseSha='b'.repeat(40),headSha='c'.repeat(40),policySha='a'.repeat(40);
 function spec(overrides={}) {
   return {
     version:'ddf.jobspec/v1',mode:'offline',contextBytes:1800,
-    task:{id:taskId,repository:'syllik/deep-dark-factory',issueNumber:8,branch:'slave/issue-8-controller-v0',integrationBranch:'master',baseSha},
-    policy:{contractVersion:2,approvalRef:'human:approved',sha:policySha,allowedPaths:['src/a.mjs'],publication:'allowed',humanMerge:true,maxCorrections:2,maxFallbacks:1},
+    task:{id:taskId,projectId:'example-project',source:{kind:'manual',ref:'task-8'},branch:'work/task-8',integrationBranch:'trunk',baseSha},
+    policy:{contractVersion:'ddf.policy/v1',approvalRef:'human:approved',sha:policySha,allowedPaths:['src/a.mjs'],publication:'allowed',humanMerge:true,maxCorrections:2,maxFallbacks:1},
     budget:{capMicros:1000,maxCalls:3},
     ...overrides
   };
 }
-const admission=(task)=>({contractVersion:'task-admission/v1',status:'ADMITTED',issue:task.id,revision:'d'.repeat(64),checkedAt:new Date().toISOString(),blockers:[]});
+const admission=(task)=>({contractVersion:'ddf.admission/v1',status:'ADMITTED',taskId:task.id,projectId:task.projectId,revision:'d'.repeat(64),checkedAt:new Date().toISOString(),blockers:[]});
 function rig({admissionReader=admission,invoke,backend,ciReader,reviewer,publisher,paidGrantReader,capabilityReader,approvalReader,correctionGrantReader}={}) {
   const models = new AgentRuntime({mock:{accepted:true,roles:['Executor'],offlineOnly:true,invoke:invoke||((x)=>({
     version:'ddf.result/v1',taskId,invocationId:x.invocationId,role:x.role,status:'completed',usageMicros:null
@@ -74,7 +74,7 @@ test('offline only: exact mock lifecycle stops at ready PR, never merges',async 
   assert.equal(state.spec.mode,'offline');
 });
 
-test('rejects malformed or over-context JobSpec and absent paid grant',async()=>{
+test('rejects malformed or over-context standalone JobSpec and absent paid grant',async()=>{
   assert.throws(()=>validateJobSpec(spec({contextBytes:32769})),/context/);
   assert.throws(()=>validateJobSpec(spec({budget:{capMicros:-1,maxCalls:1}})),/numeric/);
   assert.throws(()=>validateJobSpec(spec({policy:{...spec().policy,maxCorrections:3}})),/corrections/);
@@ -82,24 +82,39 @@ test('rejects malformed or over-context JobSpec and absent paid grant',async()=>
   assert.equal(validateJobSpec(live).mode,'live');
 });
 
-test('admission queued, stale and mismatched exact issue all fail closed',async t=>{
+test('admission queued, stale and mismatched exact task all fail closed',async t=>{
   for(const bad of [
     {status:'QUEUED'},
     {checkedAt:'2020-01-01T00:00:00Z'},
-    {issue:'other/repo#1'},
-    {blockers:['Missing Issue Type']}
+    {taskId:'another:task-1'},
+    {blockers:['invalid manual task']}
   ]) {
     const {controller:c}=await setup(t,{admissionReader:task=>({...admission(task),...bad})});
     await assert.rejects(c.initialize(spec()),/admission|stale|mismatch|blockers/);
   }
 });
 
-test('FE requires native org #53 owner and Project #5, never label-only',async t=>{
-  const s=spec({task:{...spec().task,id:'ChipIn-one/chipin-frontend#100',repository:'ChipIn-one/chipin-frontend',issueNumber:100}});
-  const reader=task=>({...admission(task),contractVersion:'chipin-issue-admission/v1',status:'INTAKE_COMPLETE',
-    project:{number:5,membershipCount:1,status:'Todo'},assignees:['somebody']});
-  const {controller:c}=await setup(t,{admissionReader:reader});
-  await assert.rejects(c.initialize(s),/native assignee/);
+test('any task source works without GitHub Issue, Projects or org fields',async t=>{
+  const s=spec({task:{...spec().task,id:'gitlab:ticket-100',source:{kind:'gitlab',ref:'group/project/-/issues/100'}}});
+  const {controller:c,store}=await setup(t);
+  await c.initialize(s);
+  assert.equal((await store.read(s.task.id)).phase,'ADMITTED');
+});
+
+test('built-in ManualTaskSource requires independent operator-admitted manifest',async t=>{
+  const {ManualTaskSource}=await import('../src/task-source.mjs');
+  const job=spec();
+  const manifest={id:job.task.id,projectId:job.task.projectId,source:job.task.source,
+    baseSha:job.task.baseSha,policySha:job.policy.sha,admitted:true};
+  const source=new ManualTaskSource([manifest]);
+  const {controller:c}=await setup(t,{admissionReader:task=>source.readAdmission(task,job.policy.sha)});
+  assert.equal((await c.initialize(job)).phase,'ADMITTED');
+  const wrong=new ManualTaskSource([{...manifest,admitted:false}]);
+  const {controller:blocked}=await setup(t,{admissionReader:task=>wrong.readAdmission(task,job.policy.sha)});
+  await assert.rejects(blocked.initialize(job),/admission blocked/);
+  const drift=new ManualTaskSource([{...manifest,baseSha:'e'.repeat(40)}]);
+  const {controller:stale}=await setup(t,{admissionReader:task=>drift.readAdmission(task,job.policy.sha)});
+  await assert.rejects(stale.initialize(job),/admission blocked/);
 });
 
 test('unknown usage debits full reserved cost and enforces shared cap',async t=>{
@@ -228,7 +243,7 @@ test('provider/backend ports stay separate, and executor env excludes tokens',as
     {taskId,role:'Executor',invocationId:'a'}),/usage/);
 });
 
-test('Codex, Claude and local endpoint require three independent capability acceptances',async t=>{
+test('Codex, Claude and local endpoint require independent capability acceptances',async t=>{
   const live=spec({mode:'live',budget:{capMicros:400,maxCalls:1,maxCanaries:1,
     paidAuthorization:true,authorizationRef:'human:exact-numeric-grant'}});
   for(const provider of ['codex','claude','local']) {
@@ -268,7 +283,7 @@ test('ModelProvider is a distinct executable protocol with no inherited publishe
   assert.throws(()=>new ModelProvider({id:'bad',roles:['Publisher']}),/provider roles/);
 });
 
-test('fresh canonical admission revision drift prevents invocation and resume',async t=>{
+test('fresh DDF admission revision drift prevents invocation and resume',async t=>{
   let revision='d'.repeat(64);
   const {controller:c,store}=await setup(t,{admissionReader:task=>({...admission(task),revision})});
   await c.initialize(spec());
@@ -294,4 +309,18 @@ test('stale trusted task authority blocks live initialization',async t=>{
     allowedPaths:['src/a.mjs'],checkedAt:'2020-01-01T00:00:00Z'
   })});
   await assert.rejects(c.initialize(live),/human authority missing or stale/);
+});
+
+test('no user-specific repository or personal role schema is accepted as core policy',()=>{
+  const s=spec();
+  assert.equal(validateJobSpec(s).task.source.kind,'manual');
+  assert.equal(validateJobSpec(spec({task:{...s.task,id:'portable-789',projectId:'unknown-vcs',
+    source:{kind:'forgejo',ref:'my-host/path/issue/789'},branch:'feature/789'}})).task.id,'portable-789');
+  assert.throws(()=>validateJobSpec(spec({policy:{...s.policy,contractVersion:2}})),/DDF-native policy/);
+  assert.throws(()=>validateJobSpec(spec({task:{...s.task,branch:s.task.integrationBranch}})),/unsafe or conflicting/);
+});
+
+test('admission is bound to project identity, not forge Issue labels or statuses',async t=>{
+  const {controller:c}=await setup(t,{admissionReader:task=>({...admission(task),projectId:'other-project'})});
+  await assert.rejects(c.initialize(spec()),/admission task\/project/);
 });
