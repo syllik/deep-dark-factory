@@ -264,3 +264,13 @@ test('ModelProvider is a distinct executable protocol with no inherited publishe
   assert.equal('publisher' in model,false);
   assert.throws(()=>new ModelProvider({id:'bad',roles:['Publisher']}),/provider roles/);
 });
+
+test('fresh canonical admission revision drift prevents invocation and resume',async t=>{
+  let revision='d'.repeat(64);
+  const {controller:c,store}=await setup(t,{admissionReader:task=>({...admission(task),revision})});
+  await c.initialize(spec());
+  revision='e'.repeat(64);
+  await assert.rejects(execute(c),/admission revision drift/);
+  await assert.rejects(c.initialize(spec()),/admission revision drift/);
+  assert.equal((await store.read(taskId)).ledger.calls,0);
+});
