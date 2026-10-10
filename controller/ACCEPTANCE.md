@@ -7,7 +7,7 @@
 - [x] Offline crash/uncertain handling, idempotent callback/PR lookup, SHA review dedup and two-correction ceiling.
 - [x] Offline demo marked simulated; no paid calls or GitHub publication.
 - [ ] Research PR #7 human merged; Issue #1 human accepted; implementation #8 merge authorized.
-- [ ] Read real current Issue through ChipIn org #53 reader and ai-workflow v2 policy; reject queued/stale/drift.
+- [ ] Read real current Issue through ChipIn org #53 reader and ai-workflow v2 policy; trusted task approval and per-correction grant read-back required; reject queued/stale/drift.
 - [ ] ACID shared durable state for ephemeral Actions, fencing, signed/authorized callback, cost overrun audit.
 - [ ] Harden Git workspace/sandbox; verify no publisher credentials reach model process; separate publisher identity.
 - [ ] Reuse native Development link and org #381 PR Project writer; exact PR commit/push/read-back.
