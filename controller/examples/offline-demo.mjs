@@ -4,7 +4,7 @@ import path from 'node:path';
 import { Controller } from '../src/controller.mjs';
 import { FileStateStore } from '../src/store.mjs';
 import { AgentRuntime, OfflineBackend } from '../src/adapters.mjs';
-import { digest } from '../src/contracts.mjs';
+import { digest, taskKey } from '../src/contracts.mjs';
 import { ManualTaskSource } from '../src/task-source.mjs';
 
 const id='demo:portable-task-8';
@@ -19,14 +19,14 @@ const spec={
 const dir=await mkdtemp(path.join(os.tmpdir(),'ddf-offline-demo-'));
 try {
   const runtime=new AgentRuntime({fake:{accepted:true,roles:['Executor'],offlineOnly:true,invoke:async x=>({
-    version:'ddf.result/v1',taskId:id,invocationId:x.invocationId,role:x.role,status:'completed',usageMicros:null
+    version:'ddf.result/v1',taskKey:x.taskKey,taskId:x.taskId,principalId:'demo-executor',invocationId:x.invocationId,role:x.role,status:'completed',usageMicros:null
   })}});
   const pub={
     mock:true,
     publish:async({verified,key})=>({key,verifiedDigest:digest(verified),headSha:'c'.repeat(40),
-      branch:spec.task.branch,base:'trunk',pr:999,commitCount:1,pushCount:1,
+      branch:spec.task.branch,base:'trunk',changeRef:{kind:'change_proposal',id:'demo-change-999'},commitCount:1,pushCount:1,
       forcePush:false,historyRewrite:false,humanMerge:true}),
-    markReady:async i=>({headSha:i.headSha,draft:false,humanMerge:true})
+    markReady:async i=>({headSha:i.headSha,changeRef:i.changeRef,draft:false,humanMerge:true})
   };
   const source=new ManualTaskSource([{
     id,projectId:spec.task.projectId,source:spec.task.source,
@@ -40,15 +40,16 @@ try {
       diffDigest:'e'.repeat(64),changedPaths:['example.txt']}),
     publisher:pub,
     ciReader:async receipt=>({headSha:receipt.headSha,status:'green',requiredChecksPassed:true}),
-    reviewer:{request:async({sha})=>({sha,status:'pass',readOnly:true,reviewerId:'separate-reviewer'})}
+    reviewer:{mock:true,principalId:'demo-reviewer',request:async({sha,taskKey,invocationId})=>({sha,taskKey,invocationId,status:'pass',readOnly:true,principalId:'demo-reviewer',usageMicros:null})}
   });
   await controller.initialize(spec);
-  await controller.invoke({taskId:id,provider:'fake',maxReserveMicros:250});
-  await controller.verify(id);
-  await controller.publish(id);
-  await controller.requestReview(id);
-  await controller.markReady(id);
-  const state=await controller.store.read(id);
-  console.log(JSON.stringify({status:'READY_PR_SIMULATED',phase:state.phase,chargedMicros:state.ledger.chargedMicros,
+  const key=taskKey(spec.task);
+  await controller.invoke({taskKey:key,provider:'fake',maxReserveMicros:250});
+  await controller.verify(key);
+  await controller.publish(key);
+  await controller.requestReview(key,{provider:'fake',maxReserveMicros:100});
+  await controller.markReady(key);
+  const state=await controller.store.read(key);
+  console.log(JSON.stringify({status:'READY_CHANGE_SIMULATED',phase:state.phase,chargedMicros:state.ledger.chargedMicros,
     unknownCalls:state.ledger.unknownCalls,realModelCalls:0,realGitHubPublication:false,humanMerge:true},null,2));
 } finally {await rm(dir,{recursive:true,force:true});}

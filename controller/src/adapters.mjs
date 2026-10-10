@@ -14,12 +14,12 @@ export class ModelProvider {
 
 export class AgentRuntime {
   constructor(providers) { this.providers = providers; }
-  async invoke({provider, role, payload, invocationId, mode}) {
+  async invoke({provider, role, payload, invocationId, taskKey, taskId, mode}) {
     assert(ROLES.includes(role), 'unsupported role');
     const adapter = this.providers[provider];
     assert(adapter && adapter.accepted === true && adapter.roles.includes(role), 'provider capability not accepted: ' + provider);
     if (mode === 'offline') assert(adapter.offlineOnly === true,'offline mode refuses real models');
-    return adapter.invoke({role,payload,invocationId});
+    return adapter.invoke({role,payload,invocationId,taskKey,taskId});
   }
 }
 

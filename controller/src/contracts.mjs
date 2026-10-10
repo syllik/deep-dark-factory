@@ -14,6 +14,12 @@ const branch = /^[a-zA-Z0-9][a-zA-Z0-9._/-]+$/;
 export function assert(ok,message){ if(!ok) throw new Error(message); }
 export function digest(value){ return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
 export function clone(value){ return structuredClone(value); }
+export function taskKey(task) {
+  assert(identity.test(task?.id||'') && identity.test(task?.projectId||'') &&
+    identity.test(task?.source?.kind||'') && typeof task?.source?.ref==='string' &&
+    task.source.ref.length>0 && task.source.ref.length<=512,'invalid scoped task identity');
+  return 'ddf-task:' + digest([task.projectId,task.source.kind,task.source.ref,task.id]);
+}
 
 export function validateJobSpec(spec){
   assert(spec?.version===JOBSPEC_VERSION,'unsupported JobSpec version');
@@ -55,6 +61,7 @@ export function assertFreshAdmission(receipt,spec,now=Date.now()){
   assert(receipt?.contractVersion===ADMISSION_VERSION && receipt.status==='ADMITTED',
     'DDF admission blocked, queued or from unsupported contract');
   assert(receipt.taskId===spec.task.id && receipt.projectId===spec.task.projectId &&
+    receipt.taskKey===taskKey(spec.task) &&
     /^[a-f0-9]{64}$/.test(receipt.revision||''),'admission task/project/revision mismatch');
   const checkedAt=Date.parse(receipt.checkedAt);
   assert(Number.isFinite(checkedAt)&&checkedAt<=now&&now-checkedAt<=120000,'stale admission');
@@ -64,9 +71,11 @@ export function assertFreshAdmission(receipt,spec,now=Date.now()){
 
 export function validateResult(result,expected){
   assert(result?.version===RESULT_VERSION,'unsupported Result version');
-  assert(result.taskId===expected.taskId && result.invocationId===expected.invocationId &&
+  assert(result.taskKey===expected.taskKey && result.taskId===expected.taskId &&
+    result.invocationId===expected.invocationId &&
     result.role===expected.role,'Result identity mismatch');
   assert(['completed','failed','unknown'].includes(result.status),'Result status invalid');
+  assert(identity.test(result.principalId||''),'authenticated invocation principal required');
   assert(result.usageMicros===null ||
     (Number.isSafeInteger(result.usageMicros)&&result.usageMicros>=0),
     'usage must be a nonnegative integer or explicit null');

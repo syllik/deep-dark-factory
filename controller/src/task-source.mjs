@@ -1,4 +1,4 @@
-import { assert, clone, digest, ADMISSION_VERSION } from './contracts.mjs';
+import { assert, clone, digest, taskKey, ADMISSION_VERSION } from './contracts.mjs';
 
 /**
  * Built-in TaskSource for self-contained installations and offline tests.
@@ -12,17 +12,18 @@ export class ManualTaskSource {
     for (const row of manifest) {
       assert(row?.id && row.projectId && row.source?.kind==='manual' &&
         row.source.ref && row.baseSha && row.policySha,'invalid manual task manifest');
-      assert(!this.tasks.has(row.id),'duplicate manual task');
-      this.tasks.set(row.id,clone(row));
+      const key=taskKey(row);
+      assert(!this.tasks.has(key),'duplicate manual task');
+      this.tasks.set(key,clone(row));
     }
   }
-  async readTask(taskId) {
-    const row=this.tasks.get(taskId);
+  async readTask(task) {
+    const row=this.tasks.get(taskKey(task));
     if(!row)throw new Error('manual task not found');
     return clone(row);
   }
   async readAdmission(task,policySha){
-    const row=await this.readTask(task.id);
+    const row=await this.readTask(task);
     const blockers=[];
     if (row.projectId!==task.projectId) blockers.push('project mismatch');
     if (task.source.kind!=='manual'||row.source.ref!==task.source.ref)
@@ -34,6 +35,7 @@ export class ManualTaskSource {
       contractVersion:ADMISSION_VERSION,
       status:blockers.length?'BLOCKED':'ADMITTED',
       taskId:task.id,
+      taskKey:taskKey(task),
       projectId:task.projectId,
       revision:digest(row),
       checkedAt:new Date().toISOString(),

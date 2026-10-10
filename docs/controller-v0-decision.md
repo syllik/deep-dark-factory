@@ -104,3 +104,17 @@ Publisher holds independent short-lived forge credentials; executor never gets t
 ## Activation decisions (not design dependencies)
 
 Select first demo project/source/forge and target CI; choose external StateStore placement if Actions is used; establish independently trusted identity and reviewer; approve numeric paid grant. Do **not** make a maintainer's other repository, personal workflow, organization Project, local Mac or a platform's CI prerequisite for installing DDF.
+
+## Audit-driven contract clarification (2026-10-11; architecture review)
+
+These invariants are mandatory for the offline prototype and any future live adapter, not evidence of production acceptance:
+
+1. **Scoped identity:** a task is addressed by a DDF-generated canonical `taskKey` derived from `projectId`, `source.kind`, `source.ref` and the source-local opaque `task.id`. Every StateStore key, lock, invocation, reservation, grant and callback must bind this namespace. No bare source-local ID may key shared state. Source revision/policy/base are separately frozen by JobSpec digest and fresh admission.
+2. **One paid-invocation ledger:** any billable Planner/Architect/Executor/Reviewer/Auditor operation, including external review requests and fallbacks/corrections, atomically reserves against one per-task cap and max-call count before dispatch. Unknown usage consumes its full reservation; ambiguous dispatch requires read-only reconciliation. Paid capability and independently trusted provider grant checks apply equally to reviewer calls. Declared roles without a runnable adapter remain **PENDING**, not accepted.
+3. **Forge-neutral ChangeRef:** publication returns a `changeRef:{kind,id}` describing a PR, MR or change proposal. A forge-specific numeric PR number is adapter metadata, never a core requirement. Review, ready-intent and terminal state are keyed by ChangeRef and immutable published SHA; terminal phase is `READY_CHANGE` (human merge remains separate).
+4. **Principal versus provider:** independent review is determined by the authenticated execution **principal** (actor/session) differing from the implementation principal, not by different model vendors. A Reviewer may use the same ModelProvider as an Executor; reviewer principal and read-only authorization must be attested by its adapter. Provider IDs remain accounting/routing identities only.
+5. **Offline versus live:** `FileStateStore` is strictly single-host. There is no live Actions acceptance without transactions, fencing, signed callbacks, workspace isolation, separate publisher credentials, and current-head CI/review read-back.
+
+### Issue #1 acceptance review
+
+The capability matrix, migration exclusions, optional backend choice, dependency stack, human gates and single-task vertical-slice plan satisfy the **documentation-level** research deliverables. This note does **not** close Issue #1, merge PR #7, authorize production code, or release PR #9; explicit human sign-off and merge are still required. The offline dependent draft is an experimental implementation behind that gate.

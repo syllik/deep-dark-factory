@@ -6,7 +6,7 @@ import path from 'node:path';
 import { Controller } from '../src/controller.mjs';
 import { AgentRuntime, OfflineBackend, sanitizeExecutorEnv, ActionsBackend, DedicatedMachineBackend, LocalEndpointBackend, capabilityAcceptance } from '../src/adapters.mjs';
 import { FileStateStore } from '../src/store.mjs';
-import { validateJobSpec, validateResult, digest } from '../src/contracts.mjs';
+import { validateJobSpec, validateResult, digest, taskKey } from '../src/contracts.mjs';
 
 const taskId='standalone:task-8';
 const baseSha='b'.repeat(40),headSha='c'.repeat(40),policySha='a'.repeat(40);
@@ -19,23 +19,33 @@ function spec(overrides={}) {
     ...overrides
   };
 }
-const admission=(task)=>({contractVersion:'ddf.admission/v1',status:'ADMITTED',taskId:task.id,projectId:task.projectId,revision:'d'.repeat(64),checkedAt:new Date().toISOString(),blockers:[]});
+const scopedKey=taskKey(spec().task);
+const admission=(task)=>({contractVersion:'ddf.admission/v1',status:'ADMITTED',taskId:task.id,taskKey:taskKey(task),projectId:task.projectId,revision:'d'.repeat(64),checkedAt:new Date().toISOString(),blockers:[]});
 function rig({admissionReader=admission,invoke,backend,ciReader,reviewer,publisher,paidGrantReader,capabilityReader,approvalReader,correctionGrantReader}={}) {
-  const models = new AgentRuntime({mock:{accepted:true,roles:['Executor'],offlineOnly:true,invoke:invoke||((x)=>({
-    version:'ddf.result/v1',taskId,invocationId:x.invocationId,role:x.role,status:'completed',usageMicros:null
-  }))}});
+  const models = new AgentRuntime({mock:{accepted:true,roles:['Executor'],offlineOnly:true,invoke:async x=>({
+    taskKey:x.taskKey,taskId:x.taskId,principalId:'executor-1',
+    ...await (invoke||((v)=>({version:'ddf.result/v1',invocationId:v.invocationId,role:v.role,status:'completed',usageMicros:null})))(x)
+  })}});
   const results = new Map();
+  const reviewerImpl=reviewer||{request:async()=>({status:'pass'})};
+  const mockReviewer={...reviewerImpl,mock:true,
+    principalId:reviewerImpl.principalId||'independent-reviewer',
+    async request(args) {
+      return {taskKey:args.taskKey,invocationId:args.invocationId,sha:args.sha,
+        status:'pass',readOnly:true,principalId:this.principalId,usageMicros:null,
+        ...await reviewerImpl.request(args)};
+    }};
   const trustedPublisher = publisher || {
     mock:true,
     async publish({spec,verified,key}) {
-      const receipt={key,verifiedDigest:digest(verified),headSha,branch:spec.task.branch,base:spec.task.integrationBranch,pr:8,
+      const receipt={key,verifiedDigest:digest(verified),headSha,branch:spec.task.branch,base:spec.task.integrationBranch,changeRef:{kind:'pull_request',id:'offline-pr-8'},adapter:{github:{number:8}},
         commitCount:1,pushCount:1,forcePush:false,historyRewrite:false,humanMerge:true};
       results.set(key,receipt);
       return receipt;
     },
     async lookup(key) {return results.get(key);},
-    async markReady(intent) {return {headSha:intent.headSha,draft:false,humanMerge:true};},
-    async lookupReady(intent) {return {headSha:intent.headSha,draft:false,humanMerge:true};}
+    async markReady(intent) {return {headSha:intent.headSha,changeRef:intent.changeRef,draft:false,humanMerge:true};},
+    async lookupReady(intent) {return {headSha:intent.headSha,changeRef:intent.changeRef,draft:false,humanMerge:true};}
   };
   return {
     store:null,
@@ -43,7 +53,7 @@ function rig({admissionReader=admission,invoke,backend,ciReader,reviewer,publish
       verifier:async s=>({status:'passed',baseSha:s.task.baseSha,changedPaths:['src/a.mjs'],diffDigest:'e'.repeat(64)}),
       publisher:trustedPublisher,
       ciReader:ciReader|| (async pub=>({status:'green',headSha:pub.headSha,requiredChecksPassed:true})),
-      reviewer:reviewer||{request:async ({sha})=>({sha,status:'pass',readOnly:true,reviewerId:'independent-reviewer',reference:'offline-review'})}}
+      reviewer:mockReviewer}
   };
 }
 async function setup(t,options={}) {
@@ -52,24 +62,25 @@ async function setup(t,options={}) {
   const store=new FileStateStore(dir), f=rig(options);
   return {store,controller:new Controller({store,...f.options}),...f.options};
 }
-async function execute(c,options={}) {return c.invoke({taskId,kind:'implementation',provider:'mock',maxReserveMicros:250,...options});}
+async function execute(c,options={}) {return c.invoke({taskKey:scopedKey,kind:'implementation',provider:'mock',maxReserveMicros:250,...options});}
 async function published(c) {
   await c.initialize(spec());
   await execute(c);
-  await c.verify(taskId);
-  return c.publish(taskId);
+  await c.verify(scopedKey);
+  return c.publish(scopedKey);
 }
 
 test('offline only: exact mock lifecycle stops at ready PR, never merges',async t=>{
   const {controller:c,store}=await setup(t);
   const pub=await published(c);
   assert.equal(pub.headSha,headSha);
-  await c.requestReview(taskId);
-  await c.markReady(taskId);
-  const state=await store.read(taskId);
-  assert.equal(state.phase,'READY_PR');
-  assert.equal(state.ledger.chargedMicros,250);
-  assert.equal(state.ledger.unknownCalls,1);
+  await c.requestReview(scopedKey,{provider:'mock',maxReserveMicros:100});
+  await c.markReady(scopedKey);
+  const state=await store.read(scopedKey);
+  assert.equal(state.phase,'READY_CHANGE');
+  assert.equal(state.ledger.chargedMicros,350);
+  assert.equal(state.ledger.calls,2);
+  assert.equal(state.ledger.unknownCalls,2);
   assert.equal(state.publication.receipt.headSha,headSha);
   assert.equal(state.spec.mode,'offline');
 });
@@ -98,7 +109,7 @@ test('any task source works without GitHub Issue, Projects or org fields',async 
   const s=spec({task:{...spec().task,id:'gitlab:ticket-100',source:{kind:'gitlab',ref:'group/project/-/issues/100'}}});
   const {controller:c,store}=await setup(t);
   await c.initialize(s);
-  assert.equal((await store.read(s.task.id)).phase,'ADMITTED');
+  assert.equal((await store.read(taskKey(s.task))).phase,'ADMITTED');
 });
 
 test('built-in ManualTaskSource requires independent operator-admitted manifest',async t=>{
@@ -121,10 +132,10 @@ test('unknown usage debits full reserved cost and enforces shared cap',async t=>
   const {controller:c,store}=await setup(t);
   await c.initialize(spec({budget:{capMicros:300,maxCalls:3}}));
   await execute(c);
-  const state=await store.read(taskId);
+  const state=await store.read(scopedKey);
   assert.equal(state.ledger.chargedMicros,250);
   assert.equal(state.ledger.unknownCalls,1);
-  await assert.rejects(c.invoke({taskId,role:'Executor',provider:'mock',kind:'fallback',maxReserveMicros:100}),/fallback|cap/);
+  await assert.rejects(c.invoke({taskKey:scopedKey,role:'Executor',provider:'mock',kind:'fallback',maxReserveMicros:100}),/fallback|cap/);
 });
 
 test('reserve persisted before backend invocation and crash blocks auto-replay',async t=>{
@@ -133,7 +144,7 @@ test('reserve persisted before backend invocation and crash blocks auto-replay',
   t.after(()=>rm(dir,{recursive:true,force:true}));
   const store=new FileStateStore(dir);
   const f=rig({backend:{offlineSafe:true,run:async()=>{
-    before=await store.read(taskId);
+    before=await store.read(scopedKey);
     throw new Error('ambiguous dispatch');
   }}});
   const c=new Controller({store,...f.options});
@@ -141,7 +152,7 @@ test('reserve persisted before backend invocation and crash blocks auto-replay',
   await assert.rejects(execute(c),/uncertain/);
   assert.equal(before.invocations[0].status,'RESERVED');
   assert.equal(before.ledger.reservedMicros,250);
-  assert.equal((await store.read(taskId)).phase,'BLOCKED_UNCERTAIN');
+  assert.equal((await store.read(scopedKey)).phase,'BLOCKED_UNCERTAIN');
   await assert.rejects(execute(c),/blocked/);
 });
 
@@ -151,10 +162,10 @@ test('atomic store lock rejects concurrent tasks and requires operator recovery'
   const hold=new Promise(resolve=>{release=resolve;});
   let entered;
   const enteredP=new Promise(resolve=>{entered=resolve;});
-  const first=store.withTask(taskId,async()=>{entered();await hold;return true;});
+  const first=store.withTask(scopedKey,async()=>{entered();await hold;return true;});
   await enteredP;
-  await assert.rejects(store.withTask(taskId,async()=>true),/locked/);
-  await assert.rejects(store.recoverOrphanedLock(taskId),/manual/);
+  await assert.rejects(store.withTask(scopedKey,async()=>true),/locked/);
+  await assert.rejects(store.recoverOrphanedLock(scopedKey),/manual/);
   release();
   assert.equal(await first,true);
 });
@@ -167,19 +178,19 @@ test('failed invocation may use exactly one fallback with same ledger',async t=>
   })});
   await c.initialize(spec());
   assert.equal((await execute(c)).phase,'BLOCKED');
-  assert.equal((await c.invoke({taskId,role:'Executor',provider:'mock',kind:'fallback',maxReserveMicros:250})).phase,'EXECUTED');
-  assert.equal((await store.read(taskId)).ledger.chargedMicros,500);
-  await assert.rejects(c.invoke({taskId,role:'Executor',provider:'mock',kind:'fallback',maxReserveMicros:250}),/fallback/);
+  assert.equal((await c.invoke({taskKey:scopedKey,role:'Executor',provider:'mock',kind:'fallback',maxReserveMicros:250})).phase,'EXECUTED');
+  assert.equal((await store.read(scopedKey)).ledger.chargedMicros,500);
+  await assert.rejects(c.invoke({taskKey:scopedKey,role:'Executor',provider:'mock',kind:'fallback',maxReserveMicros:250}),/fallback/);
 });
 
 test('pending callback is settled once; conflicting repeats rejected',async t=>{
   const {controller:c}=await setup(t,{backend:{offlineSafe:true,run:async()=>({kind:'pending',reference:'job-1'})}});
   await c.initialize(spec());
   const first=await execute(c);
-  const result={version:'ddf.result/v1',taskId,role:'Executor',invocationId:first.invocationId,status:'completed',usageMicros:null};
-  assert.equal((await c.receiveResult(taskId,first.invocationId,result)).phase,'EXECUTED');
-  assert.equal((await c.receiveResult(taskId,first.invocationId,result)).kind,'already-settled');
-  await assert.rejects(c.receiveResult(taskId,first.invocationId,{...result,usageMicros:0}),/conflicting/);
+  const result={version:'ddf.result/v1',taskKey:scopedKey,taskId,principalId:'executor-1',role:'Executor',invocationId:first.invocationId,status:'completed',usageMicros:null};
+  assert.equal((await c.receiveResult(scopedKey,first.invocationId,result)).phase,'EXECUTED');
+  assert.equal((await c.receiveResult(scopedKey,first.invocationId,result)).kind,'already-settled');
+  await assert.rejects(c.receiveResult(scopedKey,first.invocationId,{...result,usageMicros:0}),/conflicting/);
 });
 
 test('publication holds durable intent, only lookup can resolve ambiguous push',async t=>{
@@ -188,45 +199,45 @@ test('publication holds durable intent, only lookup can resolve ambiguous push',
     mock:true,
     publish:async ({key,verified,spec})=>{
       receipt={key,verifiedDigest:digest(verified),headSha,branch:spec.task.branch,base:spec.task.integrationBranch,
-        pr:10,commitCount:1,pushCount:1,forcePush:false,historyRewrite:false,humanMerge:true};
+        changeRef:{kind:'merge_request',id:'sample-mr-10'},commitCount:1,pushCount:1,forcePush:false,historyRewrite:false,humanMerge:true};
       throw new Error('lost response');
     },
     lookup:async()=>receipt
   };
   const {controller:c,store}=await setup(t,{publisher:mock});
-  await c.initialize(spec());await execute(c);await c.verify(taskId);
-  await assert.rejects(c.publish(taskId),/uncertain/);
-  assert.equal((await store.read(taskId)).publication.status,'PENDING');
+  await c.initialize(spec());await execute(c);await c.verify(scopedKey);
+  await assert.rejects(c.publish(scopedKey),/uncertain/);
+  assert.equal((await store.read(scopedKey)).publication.status,'PENDING');
   const recovered=await c.reconcilePublication(taskId);
-  assert.equal(recovered.pr,10);
-  await assert.rejects(c.publish(taskId),/un-published/);
+  assert.equal(recovered.changeRef.id,'sample-mr-10');
+  await assert.rejects(c.publish(scopedKey),/un-published/);
 });
 
 test('review deduplicated on actually published SHA; CI must be green',async t=>{
   const {controller:c}=await setup(t);
   await published(c);
-  await c.requestReview(taskId);
-  await assert.rejects(c.requestReview(taskId),/published PR required|already requested/);
+  await c.requestReview(scopedKey,{provider:'mock',maxReserveMicros:100});
+  await assert.rejects(c.requestReview(scopedKey,{provider:'mock',maxReserveMicros:100}),/published PR required|already requested/);
   const {controller:other}=await setup(t,{ciReader:async()=>({status:'green',headSha:'f'.repeat(40),requiredChecksPassed:true})});
   await published(other);
-  await assert.rejects(other.requestReview(taskId),/current published SHA/);
+  await assert.rejects(other.requestReview(scopedKey,{provider:'mock',maxReserveMicros:100}),/current published SHA/);
 });
 
 test('third correction denied, even if task attempts repeated findings',async t=>{
   const {controller:c,store}=await setup(t,{reviewer:{request:async({sha})=>({sha,status:'findings',readOnly:true,reviewerId:'independent-reviewer'})}});
   await published(c);
-  await c.requestReview(taskId);
-  await store.withTask(taskId,async(get,save)=>{
+  await c.requestReview(scopedKey,{provider:'mock',maxReserveMicros:100});
+  await store.withTask(scopedKey,async(get,save)=>{
     const s=get();s.corrections=2;await save(s);
   });
-  await assert.rejects(c.invoke({taskId,role:'Executor',provider:'mock',kind:'correction',maxReserveMicros:250,
+  await assert.rejects(c.invoke({taskKey:scopedKey,role:'Executor',provider:'mock',kind:'correction',maxReserveMicros:250,
     authorization:{headSha,reference:'human:correction',findingsPackageCount:1}}),/correction cap/);
 });
 
 test('unapproved correction findings package fails closed',async t=>{
   const {controller:c}=await setup(t,{reviewer:{request:async({sha})=>({sha,status:'findings',readOnly:true,reviewerId:'independent-reviewer'})}});
-  await published(c);await c.requestReview(taskId);
-  await assert.rejects(c.invoke({taskId,role:'Executor',provider:'mock',kind:'correction',maxReserveMicros:250,
+  await published(c);await c.requestReview(scopedKey,{provider:'mock',maxReserveMicros:100});
+  await assert.rejects(c.invoke({taskKey:scopedKey,role:'Executor',provider:'mock',kind:'correction',maxReserveMicros:250,
     authorization:{headSha,reference:'human:correction',findingsPackageCount:2}}),/consolidated/);
 });
 
@@ -239,8 +250,8 @@ test('provider/backend ports stay separate, and executor env excludes tokens',as
   assert.equal(capabilityAcceptance.codex.status,'PENDING');
   assert.equal(capabilityAcceptance.claude.status,'PENDING');
   assert.equal(capabilityAcceptance.local.status,'PENDING');
-  assert.throws(()=>validateResult({version:'ddf.result/v1',taskId,role:'Executor',invocationId:'a',status:'completed'},
-    {taskId,role:'Executor',invocationId:'a'}),/usage/);
+  assert.throws(()=>validateResult({version:'ddf.result/v1',taskKey:scopedKey,taskId,principalId:'executor-1',role:'Executor',invocationId:'a',status:'completed'},
+    {taskKey:scopedKey,taskId,role:'Executor',invocationId:'a'}),/usage/);
 });
 
 test('Codex, Claude and local endpoint require independent capability acceptances',async t=>{
@@ -248,10 +259,10 @@ test('Codex, Claude and local endpoint require independent capability acceptance
     paidAuthorization:true,authorizationRef:'human:exact-numeric-grant'}});
   for(const provider of ['codex','claude','local']) {
     const {controller:c,store}=await setup(t,{
-      approvalReader:async task=>({status:'APPROVED',taskId:task.id,
+      approvalReader:async task=>({status:'APPROVED',taskId:task.id,taskKey:taskKey(task),
         approvalRef:'human:approved',policySha,baseSha,publication:'allowed',humanMerge:true,
         maxCorrections:2,maxFallbacks:1,allowedPaths:['src/a.mjs'],checkedAt:new Date().toISOString()}),
-      paidGrantReader:async task=>({status:'APPROVED',taskId:task.id,
+      paidGrantReader:async task=>({status:'APPROVED',taskId:task.id,taskKey:taskKey(task),
         authorizationRef:'human:exact-numeric-grant',capMicros:400,maxCalls:1,maxCanaries:1,
         checkedAt:new Date().toISOString(),allowedProviders:[provider]}),
       capabilityReader:async name=>({provider:name,status:'PENDING',secretIsolation:false,
@@ -259,8 +270,8 @@ test('Codex, Claude and local endpoint require independent capability acceptance
     });
     const name=live.task.id;
     await c.initialize(live);
-    await assert.rejects(c.invoke({taskId:name,role:'Executor',provider,maxReserveMicros:150}),/capability acceptance pending/);
-    assert.equal((await store.read(name)).ledger.calls,0);
+    await assert.rejects(c.invoke({taskKey:taskKey(live.task),role:'Executor',provider,maxReserveMicros:150}),/capability acceptance pending/);
+    assert.equal((await store.read(taskKey(live.task))).ledger.calls,0);
   }
 });
 
@@ -271,7 +282,7 @@ test('known usage above reserved ceiling blocks without allowing replay',async t
   await c.initialize(spec());
   const call=await execute(c);
   assert.equal(call.phase,'BLOCKED_UNCERTAIN');
-  assert.equal((await store.read(taskId)).ledger.chargedMicros,300);
+  assert.equal((await store.read(scopedKey)).ledger.chargedMicros,300);
   await assert.rejects(execute(c),/blocked/);
 });
 
@@ -290,7 +301,7 @@ test('fresh DDF admission revision drift prevents invocation and resume',async t
   revision='e'.repeat(64);
   await assert.rejects(execute(c),/admission revision drift/);
   await assert.rejects(c.initialize(spec()),/admission revision drift/);
-  assert.equal((await store.read(taskId)).ledger.calls,0);
+  assert.equal((await store.read(scopedKey)).ledger.calls,0);
 });
 
 test('a JobSpec approvalRef never substitutes a trusted human grant',async t=>{
@@ -304,7 +315,7 @@ test('stale trusted task authority blocks live initialization',async t=>{
   const live=spec({mode:'live',budget:{capMicros:400,maxCalls:1,maxCanaries:1,
     paidAuthorization:true,authorizationRef:'human:exact-numeric-grant'}});
   const {controller:c}=await setup(t,{approvalReader:async task=>({
-    status:'APPROVED',taskId:task.id,approvalRef:'human:approved',policySha,baseSha,
+    status:'APPROVED',taskId:task.id,taskKey:taskKey(task),approvalRef:'human:approved',policySha,baseSha,
     publication:'allowed',humanMerge:true,maxCorrections:2,maxFallbacks:1,
     allowedPaths:['src/a.mjs'],checkedAt:'2020-01-01T00:00:00Z'
   })});
@@ -334,4 +345,99 @@ test('standalone core never imports maintainer-specific repository contracts', a
     assert.doesNotMatch(source,/ChipIn-one|syllik\/ai-workflow|codex-local-runner|chipin-issue-admission|Project #5|org\/repo#issue/,
       'vendor-specific runtime dependency found: '+name);
   }
+});
+
+
+test('AUDIT: reviewer cannot bypass exhausted single-call ledger',async t=>{
+  let reviewerCalls=0;
+  const {controller:c,store}=await setup(t,{reviewer:{request:async()=>{reviewerCalls++;return {status:'pass'};}}});
+  await c.initialize(spec({budget:{capMicros:250,maxCalls:1}}));
+  await execute(c);await c.verify(scopedKey);await c.publish(scopedKey);
+  await assert.rejects(c.requestReview(scopedKey,{provider:'mock',maxReserveMicros:100}),/paid-role|cap exceeded/);
+  assert.equal(reviewerCalls,0);
+  assert.equal((await store.read(scopedKey)).ledger.calls,1);
+  assert.equal((await store.read(scopedKey)).reviewBySha[headSha],undefined);
+});
+
+test('AUDIT: identical local ID across project/source isolates store, ledger and callback',async t=>{
+  const {controller:c,store}=await setup(t),a=spec();
+  const b=spec({task:{...a.task,projectId:'other-project',source:{kind:'gitlab',ref:'group/ticket-8'}}});
+  const bKey=taskKey(b.task);
+  assert.notEqual(bKey,scopedKey);
+  await c.initialize(a);await c.initialize(b);await execute(c);
+  assert.equal((await store.read(scopedKey)).ledger.calls,1);
+  assert.equal((await store.read(bKey)).ledger.calls,0);
+  const first=(await store.read(scopedKey)).invocations[0];
+  await assert.rejects(c.receiveResult(bKey,first.invocationId,{
+    version:'ddf.result/v1',taskKey:scopedKey,taskId,role:'Executor',
+    principalId:'executor-1',invocationId:first.invocationId,status:'completed',usageMicros:null
+  }),/no pending invocation/);
+});
+
+test('AUDIT: different reviewer principal can share same model provider',async t=>{
+  const {controller:c,store}=await setup(t,{reviewer:{principalId:'reviewer-session',request:async()=>({status:'pass'})}});
+  await published(c);
+  await c.requestReview(scopedKey,{provider:'mock',maxReserveMicros:100});
+  const s=await store.read(scopedKey);
+  assert.equal(s.invocations[0].provider,s.invocations[1].provider);
+  assert.notEqual(s.invocations[0].principalId,s.invocations[1].principalId);
+});
+
+test('AUDIT: same executor/reviewer principal rejected independently of provider',async t=>{
+  let called=false;
+  const {controller:c,store}=await setup(t,{reviewer:{principalId:'executor-1',request:async()=>{called=true;return {status:'pass'};}}});
+  await published(c);
+  await assert.rejects(c.requestReview(scopedKey,{provider:'other-vendor',maxReserveMicros:100}),/review principal/);
+  assert.equal(called,false);assert.equal((await store.read(scopedKey)).ledger.calls,1);
+});
+
+test('AUDIT: lost review response blocks automatic replay; reservation retained',async t=>{
+  let calls=0;
+  const {controller:c,store}=await setup(t,{reviewer:{request:async()=>{calls++;throw new Error('lost response');}}});
+  await published(c);
+  await assert.rejects(c.requestReview(scopedKey,{provider:'mock',maxReserveMicros:100}),/uncertain/);
+  const s=await store.read(scopedKey);
+  assert.equal(s.ledger.calls,2);assert.equal(s.ledger.reservedMicros,100);
+  assert.equal(s.reviewBySha[headSha].status,'REQUESTED');
+  assert.equal((await c.recover(scopedKey)).phase,'BLOCKED_UNCERTAIN');
+  await assert.rejects(c.requestReview(scopedKey,{provider:'mock',maxReserveMicros:100}),/published change required/);
+  assert.equal(calls,1);
+});
+
+test('AUDIT: pending review callback settles once, conflicting callback rejected',async t=>{
+  const {controller:c,store}=await setup(t,{reviewer:{request:async()=>({status:'pending',reference:'async-review'})}});
+  await published(c);
+  const pending=await c.requestReview(scopedKey,{provider:'mock',maxReserveMicros:100});
+  assert.equal((await store.read(scopedKey)).ledger.reservedMicros,100);
+  const final={...pending,status:'pass',usageMicros:null};
+  await c.receiveReview(scopedKey,final);
+  assert.equal((await store.read(scopedKey)).ledger.chargedMicros,350);
+  assert.equal((await c.receiveReview(scopedKey,final)).kind,'already-reviewed');
+  await assert.rejects(c.receiveReview(scopedKey,{...final,usageMicros:0}),/conflicting duplicate/);
+});
+
+test('AUDIT: GitHub PR number is adapter metadata, not publication contract',async t=>{
+  const {controller:c,store}=await setup(t);
+  await published(c);
+  const s=await store.read(scopedKey);
+  assert.equal(s.publication.receipt.changeRef.id,'offline-pr-8');
+  assert.equal(s.publication.receipt.adapter.github.number,8);
+});
+
+test('AUDIT: live review provider must pass trusted paid grant and own acceptance',async t=>{
+  const live=spec({mode:'live',budget:{capMicros:400,maxCalls:2,maxCanaries:1,paidAuthorization:true,authorizationRef:'grant'}});
+  const {controller:c}=await setup(t,{
+    approvalReader:async task=>({status:'APPROVED',taskId:task.id,taskKey:taskKey(task),
+      approvalRef:'human:approved',policySha,baseSha,publication:'allowed',humanMerge:true,
+      maxCorrections:2,maxFallbacks:1,allowedPaths:['src/a.mjs'],checkedAt:new Date().toISOString()}),
+    paidGrantReader:async task=>({status:'APPROVED',taskId:task.id,taskKey:taskKey(task),
+      authorizationRef:'grant',capMicros:400,maxCalls:2,maxCanaries:1,
+      allowedProviders:['executor-model'],checkedAt:new Date().toISOString()}),
+    capabilityReader:async provider=>({provider,status:'PENDING',secretIsolation:false,
+      usageAccounting:false,idempotency:false,sandbox:false})
+  });
+  await c.initialize(live);
+  const s=await c.store.read(scopedKey);
+  await assert.rejects(c._reservePaid(s,{role:'Reviewer',kind:'review',provider:'review-model',maxReserveMicros:100}),/provider not allowed/);
+  assert.equal(s.ledger.calls,0);
 });
