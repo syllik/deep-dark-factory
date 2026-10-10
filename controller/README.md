@@ -36,3 +36,5 @@ No deployed Codex/Claude/local adapter is accepted. They require independent cap
 5. Separate Codex, Claude, local capability acceptance. One paid canary **only after** exact numeric grant; human merge.
 
 See `ACCEPTANCE.md`. This branch intentionally contains no live adapter activation and no secrets.
+
+**Additional live authority boundary:** a trusted external task-v2 `approvalReader` must confirm task identity, policy/base SHA, exact allowed paths and publication/fallback/correction limits at every stage. Each correction additionally requires a fresh trusted head- and batch-bound `correctionGrantReader`. An `approvalRef` or correction reference supplied in JobSpec/payload is never sufficient.
