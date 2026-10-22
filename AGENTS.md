@@ -61,6 +61,8 @@ This boundary governs the DDF product runtime only. Development of this reposito
 DDF must remain independently buildable and usable for arbitrary projects. Its sole runtime authority is the versioned DDF contracts and the target project's explicitly configured adapters. Do not read, import, generate or enforce workflow policy, project registry, admission contracts, issue metadata, or agent routing from another maintainer repository. Historical references are research only. Do not hard-code organization/repository identities, GitHub Issue shape, Projects, Codex, external role selectors or GitHub Actions as prerequisites.
 
 A built-in manual TaskSource + DDF-native policy/admission path must work without any external forge connection. GitHub, GitLab, Forgejo, dedicated machines and external policy systems may be optional adapters only.
+
+## Managed development routing
 <!-- ai-workflow:agents-routing:start -->
 Canonical AI routing:
 1. Read the canonical workflow: https://github.com/syllik/ai-workflow/blob/HEAD/FLOW.md.
