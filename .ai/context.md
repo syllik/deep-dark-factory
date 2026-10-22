@@ -32,7 +32,8 @@ Build a universal, standalone open-source software factory for **any** software 
 - Branch roles are fixed as follows: `dungeon-master` is production, `master` is staging/integration, and agent development branches use `slave/<feature>`.
 - Agent changes should reach `master` through pull requests; `dungeon-master` is not a direct agent-development target.
 
-- Admission, task identity and policy formats are DDF-owned, with no dependency on another repository's workflow rules.
+- At product runtime, admission, task identity and policy formats are DDF-owned, with no dependency on another repository's workflow rules.
+- Development of this repository is a managed `syllik/ai-workflow` project and follows the routing block in `AGENTS.md` (owner decision 2026-10-22).
 
 ## Internal naming note
 
