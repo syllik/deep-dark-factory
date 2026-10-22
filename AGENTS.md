@@ -53,7 +53,6 @@ During the research phase, substantive work should update the research/architect
 ## Naming note
 
 The project name has an internal gachi reference. Keep that reference internal to agent/project context; do not mention or explain it in the README or other user-facing documentation.
-
 <!-- ai-workflow:agents-routing:start -->
 Canonical AI routing:
 1. Read the canonical workflow: https://github.com/syllik/ai-workflow/blob/HEAD/FLOW.md.
