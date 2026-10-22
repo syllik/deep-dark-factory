@@ -1,6 +1,6 @@
 # Deep Dark Factory
 
-Deep Dark Factory is a greenfield, open-source software engineering factory for autonomous and human-supervised development workflows.
+Deep Dark Factory is a **standalone**, open-source software engineering factory for autonomous and human-supervised development of **arbitrary projects**. It has no runtime, policy, admission or build dependency on its maintainer's other repositories.
 
 The project is intentionally vendor-neutral. It is not a Fabro fork and does not use Fabro as its implementation base; Fabro and similar systems may be studied as architecture references during research.
 
