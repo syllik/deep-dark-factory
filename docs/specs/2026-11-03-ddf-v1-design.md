@@ -122,7 +122,9 @@ flags (off the conveyor): needs-owner, hold, failed; global: paused
 
 **Planner** verdicts: `READY` (spec, acceptance criteria, risk class proposal, zones, dependencies), `DECOMPOSE`, `ASK` (→ `needs-owner`), `REJECT` (→ `needs-owner` with reason). If the spec is ambiguous but product intent is clear, the Planner proposes an `AGENT-DEFAULT` decision; the Executor writes it into the project's decision log as part of the change, so it is reviewed. Owner-written tasks may be in any language; the Planner writes the spec in English.
 
-**waiting:** a `ready` task whose dependencies are open, or whose zones are held, waits. A zone is held from `running` until the holding task is merged or leaves the conveyor. Two tasks overlapping in files outside any declared zone: the second is rebased by sync after the first merges.
+**waiting:** a `ready` task whose dependencies are open, or whose zones are held, waits. A zone is held from `running` until the holding task is merged or leaves the conveyor. Two tasks overlapping in files outside any declared zone: the second is synced with the base (§5.2 Sync) after the first merges.
+
+**Priority order** when a slot frees: tasks already in `fixing` or `merge`, then `ci`/`review` work, then `ready` tasks by priority (forge label `priority:high|normal|low`, default normal), then by satisfied dependencies, then oldest first; follow-ups last.
 
 **Executor** runs in a container on a workspace copy, may use subagents, runs the profile's verify inside the container, and exports a patch (§8.3). Verdicts: `COMPLETE` → `publishing`; `BLOCKED` → `needs-owner`.
 
@@ -130,7 +132,7 @@ flags (off the conveyor): needs-owner, hold, failed; global: paused
 
 **CI** (§6.6 required checks) on the current head. For `forge-local` the daemon runs verify in a fresh container as CI. One automatic rerun per head; pass-on-rerun is recorded as a flake; a test flaking in two changes produces a `needs-owner` quarantine proposal (never an auto-executed task). CI failure → Executor CI-fix attempt.
 
-**Review.** The reviewer set comes from policy (§6.2). Reviewers run in parallel on the same head, each in a fresh container, read-only, with no repository-controlled agent configuration (§8.4) and no executor transcript. Blocking findings → `fixing`. P2 → one follow-up task per change (`ddf:followup`, auto-picked at lowest priority). P3 → appended to the project's standing minors task, never executed. Findings on a follow-up task are never turned into further follow-ups: they go to minors.
+**Review.** The reviewer set comes from policy (§6.2). Reviewers run in parallel on the same head, each in a fresh container, read-only, with no repository-controlled agent configuration (§8.4) and no executor transcript. Blocking findings → `fixing`. P2 → one follow-up task per change (`ddf:followup`, auto-picked at lowest priority, risk class at least the parent's). P3 → appended to the project's standing minors task, never executed. Findings on a follow-up task are never turned into further follow-ups: they go to minors.
 
 **Fixing.** One correction batch = one Executor run addressing all blocking findings, then CI, then a full re-review of the new head with prior findings. The Executor may answer a finding "won't fix + reason". A finding is identified across rounds by `{role, category, location, normalized problem}`; the same finding confirmed blocking twice → `needs-owner`.
 
@@ -145,7 +147,9 @@ flags (off the conveyor): needs-owner, hold, failed; global: paused
 | review missing/stale/not approved | `review` |
 | path policy or hard stop | `needs-owner`, task drops to `propose` (§6.4) |
 | flag or global pause | stay |
-| forge read error | stay, backoff |
+| change converted to draft or closed by a human | `hold`, notify |
+| task closed by a human | leaves the conveyor; open change left for the human |
+| mergeable state unknown, forge read error | stay, backoff |
 | head moved during merge | `ci` for the new head |
 
 **Revert.** If the integration branch's CI is red on the DDF merge commit itself (after one rerun), DDF opens a revert change of risk class `revert` (§6.2) and reopens the task. A second DDF-attributed red within 24 h, across the project → global pause and Telegram alert. Red caused by a human merge is not attributed to DDF.
@@ -204,8 +208,9 @@ Forbidden by default (agents may not change them; owner-only):
 - Git behaviour: `.gitmodules`, `.gitattributes`, `.gitignore` of the repository root;
 - agent configuration and instructions: `AGENTS.md`, `CLAUDE.md`, `.claude/**`, `.mcp.json`, `opencode.json`, `.opencode/**`, `.codex/**`, `.cursor/**`;
 - `CODEOWNERS`, `LICENSE`, `.env*`;
-- the project's `ciEntrypoints` (scripts and manifests CI relies on, e.g. `package.json` for script changes, guard scripts);
 - symbolic links (any added or changed symlink is refused in V1).
+
+The project's `ciEntrypoints` (scripts and manifests CI relies on, e.g. `package.json`, guard scripts) are not forbidden but force the `sensitive` class, so dependency changes stay possible while CI weakening gets R2 at `deep`.
 
 Evaluated from the integration branch copy of the profile, never from the change itself. Projects add more.
 
@@ -216,7 +221,7 @@ Evaluated from the integration branch copy of the profile, never from the change
 1. effective autonomy is `merge-integration`; no global pause;
 2. task state is `merge`; no `needs-owner`/`hold` flag; the change never hit a hard stop or path policy;
 3. change open, not draft;
-4. every reviewer required by the risk class has a valid signed review with verdict APPROVE and zero blocking findings, for the current head **or** for an ancestor head where every later commit is a daemon-authored base merge and `git patch-id --verbatim` of the change is unchanged;
+4. every reviewer required by the risk class has a valid signed review with verdict APPROVE and zero blocking findings, for the current head **or** for an ancestor head where every later commit is a base merge the daemon itself created (its SHA recorded in the store from the daemon's own intent; author metadata does not count) and `git patch-id --verbatim` of the change is unchanged;
 5. every check in the profile's `checks.required` is present and successful on the current head (with no list: at least one check run, all successful);
 6. path policy passes;
 7. change not behind base and mergeable;
@@ -242,7 +247,7 @@ risk:
   lowMaxLines: 200
   docs: ["docs/**", "**/*.md"]
   sensitive: ["src/payments/**", "src/auth/**", "migrations/**"]
-ciEntrypoints: ["package.json", "scripts/ci/**"]
+ciEntrypoints: ["package.json", "scripts/ci/**"]   # force `sensitive`
 forbidden: ["ops/**"]
 hardStops: [secrets, deploy, real-money, data-destructive]
 zones:
@@ -323,13 +328,13 @@ The token broker mints an installation token per operation, narrowed to one repo
 
 - Daemon clones live in `~ddf/work/<forge>/<owner>/<repo>`, used only by trusted code, with hooks disabled (`core.hooksPath` to an empty directory, no fsmonitor, no filter drivers).
 - Each run gets a fresh copy (its own `.git`, no remotes, no credentials) that exists only inside the container.
-- The Executor exports `git diff --binary <base>` as `/out/change.patch`. The Publisher applies it to the daemon's clean clone with hooks and config neutralised, refuses symlinks and paths outside the repository, and evaluates path policy on the applied tree.
-- **The host never executes repository content.** Verify, the local gate and `forge-local` CI always run in fresh containers on the published commit.
+- After the Executor finishes, the adapter's trusted wrapper (not the agent) runs `git add -A && git diff --cached --binary <base>` in the container and writes `/out/change.patch`. The Publisher applies it to the daemon's clean clone with hooks and config neutralised, refuses symlinks, paths outside the repository and any path under `.git/`, and evaluates path policy on the applied tree.
+- **The host never executes repository content.** Verify, the local gate and `forge-local` CI always run in fresh containers. The local gate runs on the applied tree **before** the commit is pushed, so a failing gate produces no forge write.
 
 ### 8.4 Containers
 
 - One per run; base image from `images/` or the project's `image`; non-root user; default limits 3 GB RAM, 2 CPU, pids limit; no Docker socket.
-- **No access to host services.** On colima the VM's gateway to the host loopback is dropped by firewall rules inside the VM; containers reach only the internet. A probe verifies this (§14.1).
+- **No access to host services.** On colima the VM's gateway to the host loopback is dropped by firewall rules inside the VM, re-applied by the daemon on every VM start or recreation; containers reach only the internet. A probe verifies this at daemon start and in §14.1.
 - Services (databases, browsers) run inside the container.
 - Network egress to the internet is open in V1 (model APIs, package registries) — accepted risk.
 
@@ -409,7 +414,7 @@ templates/project/  .ddf/project.yaml, issue forms (task, request, bug), AGENTS.
 
 ## 12. DDF's own profile
 
-DDF is a pilot of itself (D1). Its profile marks `src/core/policy/**`, `src/core/lifecycle/**`, the token broker, the review-signature code, `prompts/**` and `schemas/**` as `sensitive` (R1 + R2 at `deep`). Combined with §4.4 (the daemon runs only from a maintainer-promoted ref), an autonomously merged change to DDF cannot alter the running factory until a human promotes it.
+DDF is a pilot of itself (D1). Its profile marks every security-relevant area as `sensitive` (R1 + R2 at `deep`): `src/core/policy/**`, `src/core/lifecycle/**`, `src/core/workspace/**` (hook neutralisation, patch apply), the Publisher (sanitizer, path checks), the token broker, the review-signature code, `src/adapters/agent-*/**` (settings isolation, read-only tools), `src/adapters/sandbox-*/**` (firewall), the merge code in `src/adapters/forge-*/**`, `prompts/**` and `schemas/**`. Combined with §4.4 (the daemon runs only from a maintainer-promoted ref), an autonomously merged change to DDF cannot alter the running factory until a human promotes it.
 
 ## 13. Migration
 
