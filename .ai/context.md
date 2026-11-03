@@ -2,61 +2,28 @@
 
 ## Status
 
-Research/bootstrap phase. The first architecture and migration audit is tracked in GitHub Issue #1.
+V1 design approved 2026-11-03; M1 docs in progress.
+
+Design record: [docs/specs/2026-11-03-ddf-v1-design.md](../docs/specs/2026-11-03-ddf-v1-design.md). Decisions D1–D15 are logged in [decisions.md](decisions.md). The research-only gate is lifted.
 
 ## Product intent
 
-Build a universal, standalone open-source software factory for **any** software project. No private maintainer workflow, organization schema, GitHub Issue, forge or external repository is needed for installation, execution, or policy.
+A self-hosted factory that drives a software task from intake to a merge into the project's integration branch, for any Git repository, through a forge adapter (GitHub first) or a plain Git remote. Human merge is the default; autonomous merge into the integration branch is a per-project opt-in with operator consent.
 
 ## Confirmed decisions
 
-- Repository: `syllik/deep-dark-factory`.
-- Public open-source project.
-- License: MIT.
-- Greenfield implementation.
-- Do not fork Fabro and do not use Fabro as the implementation base.
-- Fabro and similar systems may be researched for architectural lessons.
-- GitHub is the first forge adapter, not a core dependency.
-- GitHub Issues may be a first task-source adapter; built-in manual/local tasks work without GitHub.
-- GitHub Projects are optional and must not be canonical execution state.
-- Human merge remains the default final authority.
-- No architectural dependency on the existing local MacBook runner.
-- No architectural dependency on GitHub Actions for product execution.
-- Agent/model providers must be replaceable.
-- Deterministic verification should precede any model-based review or correction.
-- No concrete reviewer provider is selected or embedded in the core architecture.
-- Independent model review, if retained, is an optional provider-neutral workflow stage with read-only access by default, bounded context, structured findings, and bounded correction loops.
-- Provider-specific reviewer setup, authentication, prompts, quotas, and project-local configuration stay outside the core unless a future explicit architecture decision says otherwise.
-- Minimize token consumption through bounded/lazy context, minimal agent calls, and bounded correction loops.
-- Reuse mature generic open-source primitives when appropriate instead of rebuilding infrastructure by default.
-- Branch roles are fixed as follows: `dungeon-master` is production, `master` is staging/integration, and agent development branches use `slave/<feature>`.
-- Agent changes should reach `master` through pull requests; `dungeon-master` is not a direct agent-development target.
-
-- At product runtime, admission, task identity and policy formats are DDF-owned, with no dependency on another repository's workflow rules.
-- Development of this repository is a managed `syllik/ai-workflow` project and follows the routing block in `AGENTS.md` (owner decision 2026-10-22).
+- Repository: `syllik/deep-dark-factory`. Public, MIT, greenfield.
+- Fabro is a research reference only, not a fork, base or dependency.
+- GitHub is the first forge adapter, not a core dependency; GitHub Projects are never state.
+- Agent CLIs, providers and models are replaceable; roles name tiers, never models.
+- Deterministic checks before LLM calls; bounded context and bounded loops.
+- Branch roles: `dungeon-master` production, `master` staging/integration, `slave/<feature>` agent development; agent changes reach `master` through pull requests.
+- DDF is developed by its own docs: manual mode (`docs/orchestrator/manual-mode.md`) until M5, a human merges.
 
 ## Internal naming note
 
-Deep Dark Factory is an internal gachi reference. Do not mention or explain that reference in the README or other user-facing documentation.
+The project name carries an internal reference. Do not mention or explain it in the README or other user-facing documentation.
 
-## Research-only legacy sources
+## Historical sources
 
-Historical audits may reference external workflow/runner repositories for ideas. DDF must not load their configurations, role policy, metadata rules, contracts or credentials at runtime or as a test/build prerequisite.
-
-## Immediate objective
-
-Complete Issue #1 and determine the minimal architecture for one vertical slice:
-
-```text
-Any task source (manual, forge, local)
--> DDF-owned policy/admission
--> relevant repository context
--> isolated agent execution
--> deterministic verification
--> safe branch/PR publication
--> human merge
-```
-
-Independent model review remains an optional boundary to evaluate during Issue #1; it is not tied to any concrete provider.
-
-No production source-tree architecture is considered settled until that research is complete.
+`RESEARCH.md` and `docs/controller-v0-decision.md` are historical. DDF does not load configuration, role policy or credentials from any other repository at runtime or as a build/test prerequisite.

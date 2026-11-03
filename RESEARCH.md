@@ -1,3 +1,5 @@
+Status: historical — superseded by docs/specs/2026-11-03-ddf-v1-design.md
+
 # Research
 
 Primary tracker: [Issue #1 — Define v0 architecture and migration boundary](https://github.com/syllik/deep-dark-factory/issues/1).

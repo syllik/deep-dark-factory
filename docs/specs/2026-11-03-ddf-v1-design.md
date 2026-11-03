@@ -1,6 +1,6 @@
 # Deep Dark Factory V1 — design
 
-Status: **draft for owner review** (2026-11-03), revision 2 after an independent deep review.
+Status: **approved by the owner 2026-11-03** (revision 2 after an independent deep review).
 Supersedes as the V1 architecture: `ARCHITECTURE.md` "Open decisions", `docs/controller-v0-decision.md`, research Issue #1, Issue #8 and draft PR #9.
 Inputs: Issue #12 (decision to consolidate, carried-over requirements, agent identity requirements), the maintainer-approved autonomous-flow design of a private pilot project (2026-10-28), `syllik/codex-local-runner-archive` `docs/DDF-LESSONS.md`, an audit of the existing agent workflow repositories (2026-11-03).
 

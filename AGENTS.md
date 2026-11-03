@@ -1,76 +1,45 @@
 # Agent Instructions
 
-Deep Dark Factory is currently in the research and architecture-definition phase.
+Entry point for every agent or LLM session working on Deep Dark Factory (DDF).
 
-## Source of truth
+Status: normative.
 
-Read, in order:
+## How DDF is developed
 
-1. `.ai/context.md`
-2. `ARCHITECTURE.md`
-3. `RESEARCH.md`
-4. the relevant GitHub Issue
+DDF is developed by its own documentation. Until milestone M5 every task runs in **manual mode**: an interactive session follows `docs/orchestrator/manual-mode.md`, and **a human merges**. No session merges its own work.
 
-Do not infer current architecture from historical conversations or from the legacy repositories.
+## Reading order
 
-## Current constraints
+1. This file.
+2. `docs/orchestrator/manual-mode.md` (or `docs/orchestrator/supervisor-mode.md` when operating a running factory through `ddf`).
+3. `docs/concepts/*`, only the concepts the task needs.
+4. The task Issue.
 
-- This is a greenfield implementation.
-- The license is MIT.
-- Fabro is a research reference only. Do not fork it, copy its implementation, or introduce it as a dependency unless a future explicit decision changes this.
-- Do not create production engine code until the v0 research/migration boundary is accepted.
-- Do not introduce GitHub Projects as required state.
-- Do not make a local Mac or self-hosted GitHub Actions runner an architectural requirement.
+Design record: `docs/specs/` (V1: `docs/specs/2026-11-03-ddf-v1-design.md`). Docs link to spec sections for rationale; when a doc and the spec disagree, the spec wins and the doc gets fixed. `RESEARCH.md` and `docs/controller-v0-decision.md` are historical.
+
+Do not infer current architecture from historical conversations or other repositories.
+
+## Constraints
+
+- License: MIT. Greenfield implementation.
+- Fabro is a research reference only: do not fork it, copy its implementation, or add it as a dependency.
+- No GitHub Projects as required state. DDF must work on a plain Git remote.
 - GitHub is the first forge adapter, not the core abstraction.
-- Codex/OpenAI/Claude or any other agent/model must be replaceable providers.
-- Human merge remains the default authority boundary.
-- Prefer deterministic checks over LLM calls whenever possible.
-- Minimize loaded context and repeated model work.
-- Never commit credentials, tokens, private keys, environment secrets, or authentication material.
+- Agent CLIs, providers and models are replaceable. Roles name tiers (`frontier|deep|standard|routine|fast`), never models.
+- Human merge is the default. Autonomous merge into the integration branch is a per-project opt-in with operator consent.
+- Prefer deterministic checks over LLM calls; keep loaded context and repeated model work minimal.
+- Before building a generic infrastructure primitive, look for a maintained open-source solution; researching one does not mean adopting or copying it.
+- Never commit credentials, tokens, private keys, environment secrets or authentication material.
+- English only in the repository.
 
-## Branching model
+## Branch roles
 
-Use the following branch roles consistently:
+- `dungeon-master`: production branch.
+- `master`: staging/integration branch.
+- `slave/<feature>`: agent development branches, short kebab-case slug.
 
-- `dungeon-master` — production branch.
-- `master` — staging/integration branch.
-- `slave/<feature>` — agent development branches. Use a short kebab-case feature/task slug after `slave/`.
-
-Agent work must branch from the appropriate staging baseline and target `master` through a pull request unless an explicit task says otherwise. Do not merge agent work directly into `dungeon-master`.
-
-## Reuse rule
-
-Before implementing a generic infrastructure primitive, research maintained open-source libraries/projects that already solve it. Prefer a small dependency or adapter when that reduces owned infrastructure without creating unacceptable lock-in.
-
-Researching an existing project does not imply adopting or copying it.
-
-## Change discipline
-
-Keep architecture decisions explicit and small. Avoid creating directories, abstractions, services, or configuration formats speculatively.
-
-During the research phase, substantive work should update the research/architecture documents and reference the governing Issue. Merge remains human-only.
+Agent work branches from `master` and targets `master` through a pull request unless a task says otherwise. Never merge agent work directly into `dungeon-master`.
 
 ## Naming note
 
-The project name has an internal gachi reference. Keep that reference internal to agent/project context; do not mention or explain it in the README or other user-facing documentation.
-
-## Standalone project boundary
-
-This boundary governs the DDF product runtime only. Development of this repository is a managed `syllik/ai-workflow` project and follows the routing block at the end of this file.
-
-DDF must remain independently buildable and usable for arbitrary projects. Its sole runtime authority is the versioned DDF contracts and the target project's explicitly configured adapters. Do not read, import, generate or enforce workflow policy, project registry, admission contracts, issue metadata, or agent routing from another maintainer repository. Historical references are research only. Do not hard-code organization/repository identities, GitHub Issue shape, Projects, Codex, external role selectors or GitHub Actions as prerequisites.
-
-A built-in manual TaskSource + DDF-native policy/admission path must work without any external forge connection. GitHub, GitLab, Forgejo, dedicated machines and external policy systems may be optional adapters only.
-
-## Managed development routing
-<!-- ai-workflow:agents-routing:start -->
-Canonical AI routing:
-1. Read the canonical workflow: https://github.com/syllik/ai-workflow/blob/HEAD/FLOW.md.
-2. Select one GitHub record from https://github.com/syllik/ai-workflow/blob/HEAD/workspace.yaml / https://github.com/syllik/ai-workflow/blob/HEAD/projects/index.md.
-3. Read the role index https://github.com/syllik/ai-workflow/blob/HEAD/global/workflow.md, then only the selected role file.
-4. On that record's `integrationBranch`, read target `AGENTS.md`, then `.ai/context.md`.
-5. Read relevant `.ai/decisions.md`, task files, and required declared `contextDependencies`; block if required dependency context is unavailable.
-
-GitHub Issue/PR entry never bypasses this route; use GitHub records only, no auto-discovery; legacy contexts are migration-only.
-Canonical root: ~/Desktop/WORK
-<!-- ai-workflow:agents-routing:end -->
+The project name carries an internal reference. Do not mention or explain it in the README or any other user-facing documentation.

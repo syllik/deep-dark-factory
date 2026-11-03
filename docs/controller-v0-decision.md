@@ -1,3 +1,5 @@
+Status: historical — superseded by docs/specs/2026-11-03-ddf-v1-design.md
+
 # DDF v0 — standalone controller decision
 
 Status: **proposed for review in DDF #1**, not production/live acceptance.
