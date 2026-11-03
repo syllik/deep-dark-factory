@@ -44,7 +44,7 @@ Blocking: `P0`, `P1`, `securityLevel` `High` or `Medium`, or category `hard-stop
 
 Write exactly one file: `/out/result.json`, valid against schema `ddf.reviewer.result/v1` (`schemas/reviewer.result.json`), with `"schema": "ddf.reviewer.result/v1"` and `"role": "r1"`. `findings` is always present (may be empty). Unknown fields make the result invalid.
 
-Verdict: `APPROVE` only with zero blocking findings and every checklist item (if present) `clear`; otherwise `REQUEST_CHANGES`. A `REQUEST_CHANGES` result must contain at least one blocking finding or a checklist `hit`; the schema rejects it otherwise.
+Verdict: `APPROVE` only with zero blocking findings and every checklist item (if present) `clear`; otherwise `REQUEST_CHANGES`. A `REQUEST_CHANGES` result must contain at least one blocking finding (a `hit` already requires its `hard-stop` finding); the schema rejects it otherwise.
 
 ## Bounds
 
@@ -53,6 +53,6 @@ Verdict: `APPROVE` only with zero blocking findings and every checklist item (if
 
 ## When blocked
 
-If the brief is missing what you need to judge (for example no diff, or no CI results), return `REQUEST_CHANGES` with a `P1` finding of category `correctness` whose evidence states exactly what is missing; mark checklist items you could not assess `unassessed`. Never approve what you could not review.
+If the brief is missing what you need to judge (for example no diff, or no CI results), or a checklist item cannot be assessed, return `REQUEST_CHANGES` with a `P1` finding of category `correctness` whose evidence states that this is an **input gap** and exactly what is missing and why. Mark each such checklist item `unassessed`, not `hit`: `hit` means the problem is present. The orchestrator then reruns you once with complete inputs; it does not send an input gap to the Executor. Never approve what you could not review.
 
 Reference: [roles](../docs/concepts/roles.md#reviewer-correctness), [hard stops](../docs/concepts/policy.md#hard-stops).

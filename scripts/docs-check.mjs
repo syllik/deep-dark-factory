@@ -124,13 +124,23 @@ for (const file of canon) {
 
 // (d) every marked forbidden-paths block equals the spec block, byte for byte per line.
 // Checked: docs/concepts/policy.md (block required) and every other Markdown file
-// under docs/ and prompts/ that contains a sync:forbidden marker.
+// under docs/, prompts/ and templates/ that contains a sync:forbidden marker.
+// Markers must be alone on their line and start at column 1.
 const OPEN = '<!-- sync:forbidden -->';
 const CLOSE = '<!-- /sync:forbidden -->';
 function syncBlock(r) {
   const abs = join(root, r);
   if (!existsSync(abs)) { report(`SYNC_DRIFT ${r}:0 file missing`); return null; }
   const all = lines(read(abs));
+  let misplaced = false;
+  all.forEach((l, i) => {
+    const t = l.trim();
+    if ((t === OPEN || t === CLOSE) && l !== t) {
+      misplaced = true;
+      report(`SYNC_DRIFT ${r}:${i + 1} ${/^\s/.test(l) ? 'marker must start at column 1' : 'marker must not have trailing whitespace'}`);
+    }
+  });
+  if (misplaced) return null;
   const start = all.findIndex((l) => l === OPEN);
   const end = all.findIndex((l, i) => i > start && l === CLOSE);
   if (start === -1 || end === -1) { report(`SYNC_DRIFT ${r}:0 missing sync:forbidden markers`); return null; }
@@ -140,7 +150,7 @@ const policyPath = 'docs/concepts/policy.md';
 const specPath = 'docs/specs/2026-11-03-ddf-v1-design.md';
 const spec = syncBlock(specPath);
 const syncTargets = new Set([policyPath]);
-for (const file of [...walk(join(root, 'docs')), ...walk(join(root, 'prompts'))]) {
+for (const file of ['docs', 'prompts', 'templates'].flatMap((d) => walk(join(root, d)))) {
   const r = rel(file);
   if (r === specPath || !r.endsWith('.md')) continue;
   if (lines(read(file)).some((l) => l.trim() === OPEN || l.trim() === CLOSE)) syncTargets.add(r);

@@ -120,7 +120,7 @@ The Telegram bot token is a secret and lives in the secrets directory, not here.
 
 | Key | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `limits.minFreeDiskGb` | integer ≥ 1 | no | 15 | operator floor: below this free disk space no new runs start; 0 is rejected because it would disable the guard |
+| `limits.minFreeDiskGb` | integer ≥ 1 | no | 15 | operator-tunable floor (product default 15; may be raised or lowered): below this free disk space no new runs start; 0 is rejected because it would disable the guard |
 | `limits.maxRunsPerTask` | integer 1–20 | no | 20 | agent runs per task, all roles ([lifecycle.md](../concepts/lifecycle.md#bounds)); the operator may only lower the product bound |
 
 ### Example
@@ -146,4 +146,4 @@ limits:
 ## Not in these files
 
 - GitHub App IDs belong to the operator layer ([spec §3](../specs/2026-11-03-ddf-v1-design.md#3-configuration-layers)) but are not part of the `ddf.projects/v1` or `ddf.routing/v1` schemas; their location is fixed with `ddf apps create` in M4.
-- Run timeouts, CI wait, CI-fix, correction-batch and sync-batch bounds are product defaults ([lifecycle.md](../concepts/lifecycle.md#bounds)), not operator keys in V1. The only bound an operator sets is `limits.maxRunsPerTask`, and only downwards.
+- Run timeouts, CI wait, CI-fix, correction-batch and sync-batch bounds are product defaults ([lifecycle.md](../concepts/lifecycle.md#bounds)), not operator keys in V1. The only §5.3 lifecycle bound an operator sets is `limits.maxRunsPerTask` (lower only). The other limits (`limits.maxConcurrentContainers` and `limits.maxSubagentsPerRun` in `ddf.routing/v1`, `limits.minFreeDiskGb` in `ddf.projects/v1`) are operator-tunable resource settings, not lifecycle bounds.

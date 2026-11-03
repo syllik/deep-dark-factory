@@ -94,6 +94,7 @@ The Publisher writes the change body and squash message from a template; agent t
 
 - The reviewer set comes from the risk class ([policy.md](policy.md#risk-classes)).
 - Reviewers run in parallel on the same head, each in a fresh container, read-only, with no repository-controlled agent configuration and no executor transcript.
+- Any hard-stop checklist item `unassessed` means the review inputs were incomplete: that reviewer is rerun once with complete inputs (this counts as its invalid-result retry, see [Bounds](#bounds)), then `needs-owner`. It never causes a correction batch, and the input-gap `P1` that accompanies it is not routed to `fixing`.
 - Blocking findings ([policy.md](policy.md#findings)) → `fixing`.
 - P2 → one follow-up task per change (`ddf:followup`, auto-picked at lowest priority, risk class at least the parent's).
 - P3 → appended to the project's standing minors task, never executed.

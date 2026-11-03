@@ -32,7 +32,7 @@
       "additionalProperties": false,
       "properties": {
         "minFreeDiskGb": {
-          "description": "Operator floor: below this free disk space no new runs start. Default is the product default (15); 0 is rejected because it would disable the guard.",
+          "description": "Operator-tunable floor (product default 15): below this free disk space no new runs start. The operator may raise or lower it; this is a resource setting, not a spec section 5.3 lifecycle bound. 0 is rejected because it would disable the guard.",
           "type": "integer",
           "minimum": 1,
           "default": 15
