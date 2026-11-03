@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ddf.planner.result/v1",
+  "title": "DDF Planner result",
+  "description": "Written by the Planner to /out/result.json. See prompts/planner.md and spec section 5.2.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "verdict"],
+  "properties": {
+    "schema": { "const": "ddf.planner.result/v1" },
+    "verdict": { "enum": ["READY", "DECOMPOSE", "ASK", "REJECT"] },
+    "spec": { "type": "string", "minLength": 1 },
+    "acceptance": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "riskProposal": { "enum": ["docs", "low", "standard", "sensitive"] },
+    "zones": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "dependsOn": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "children": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "spec"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1 },
+          "spec": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "question": { "type": "string", "minLength": 1 },
+    "reason": { "type": "string", "minLength": 1 },
+    "agentDefaults": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["question", "choice"],
+        "properties": {
+          "question": { "type": "string", "minLength": 1 },
+          "choice": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "verdict": { "const": "READY" } } },
+      "then": {
+        "required": ["spec", "acceptance", "riskProposal"],
+        "properties": { "acceptance": { "minItems": 1 } }
+      }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "DECOMPOSE" } } },
+      "then": {
+        "required": ["children"],
+        "properties": { "children": { "minItems": 1 } }
+      }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "ASK" } } },
+      "then": { "required": ["question"] }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "REJECT" } } },
+      "then": { "required": ["reason"] }
+    }
+  ]
+}

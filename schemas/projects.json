@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ddf.projects/v1",
+  "title": "DDF operator projects (<operator-config>/projects.yaml)",
+  "description": "Connected projects with the operator's maximum autonomy and allow-listed humans, plus notification settings and limits (spec sections 3, 5.1, 9). Secrets never appear here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["projects"],
+  "properties": {
+    "projects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/project" }
+    },
+    "notifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "telegram": {
+          "description": "Owner answers and commands are accepted only from this user ID in this chat. The bot token is a secret and lives in the secrets directory.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["userId", "chatId"],
+          "properties": {
+            "userId": { "type": "string", "pattern": "^-?[0-9]+$" },
+            "chatId": { "type": "string", "pattern": "^-?[0-9]+$" }
+          }
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minFreeDiskGb": {
+          "description": "Below this free disk space no new runs start.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 15
+        },
+        "maxRunsPerTask": {
+          "description": "Agent runs per task, all roles.",
+          "type": "integer",
+          "minimum": 1,
+          "default": 20
+        }
+      }
+    }
+  },
+  "$defs": {
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "forge", "maxAutonomy"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "forge": { "enum": ["github", "local"] },
+        "repository": {
+          "description": "Forge repository as <owner>/<repo>.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "remote": {
+          "description": "Plain Git remote URL (file:// or ssh://).",
+          "type": "string",
+          "pattern": "^(file|ssh)://"
+        },
+        "maxAutonomy": { "enum": ["propose", "merge-integration"] },
+        "allowedActors": {
+          "description": "Forge logins whose intake marks and answers are accepted.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "forge": { "const": "github" } } },
+          "then": {
+            "required": ["repository", "allowedActors"],
+            "not": { "required": ["remote"] },
+            "properties": { "allowedActors": { "minItems": 1 } }
+          }
+        },
+        {
+          "if": { "properties": { "forge": { "const": "local" } } },
+          "then": {
+            "required": ["remote"],
+            "not": { "required": ["repository"] }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ddf.project/v1",
+  "title": "DDF project profile (.ddf/project.yaml)",
+  "description": "Per-project policy, always read from the integration branch. Keys follow spec section 6.7; policy only tightens across layers (section 3).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "integrationBranch", "verify"],
+  "properties": {
+    "version": { "const": "ddf.project/v1" },
+    "integrationBranch": { "type": "string", "minLength": 1 },
+    "autonomy": {
+      "description": "Requested level; effective = min(operator maximum, this). Default propose.",
+      "enum": ["propose", "merge-integration"],
+      "default": "propose"
+    },
+    "verify": {
+      "description": "Commands run inside containers only.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "description": "Forge check names the merge gate requires. Without a list: at least one check run, all successful.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "image": {
+      "description": "Optional container build file; default base image otherwise.",
+      "type": "string",
+      "minLength": 1
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "lowMaxLines": { "type": "integer", "minimum": 0, "default": 200 },
+        "docs": { "$ref": "#/$defs/globs" },
+        "sensitive": { "$ref": "#/$defs/globs" }
+      }
+    },
+    "ciEntrypoints": {
+      "description": "Scripts and manifests CI relies on; force the sensitive class.",
+      "$ref": "#/$defs/globs"
+    },
+    "forbidden": {
+      "description": "Additional forbidden path globs on top of the product defaults.",
+      "$ref": "#/$defs/globs"
+    },
+    "hardStops": {
+      "description": "Hard-stop categories, e.g. secrets, deploy, real-money, data-destructive. Projects may add categories.",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    },
+    "zones": {
+      "type": "object",
+      "patternProperties": {
+        "^[A-Za-z0-9][A-Za-z0-9_-]*$": { "$ref": "#/$defs/globs" }
+      },
+      "additionalProperties": false
+    },
+    "planning": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxAutoChildren": { "type": "integer", "minimum": 0, "default": 3 }
+      }
+    },
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "branch": { "type": "string", "minLength": 1 },
+        "merge": { "enum": ["squash"], "default": "squash" },
+        "template": { "type": "string", "minLength": 1 }
+      }
+    },
+    "reviewers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "r2DifferentProvider": {
+          "description": "Require R2 on a different provider than the Executor.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    }
+  },
+  "$defs": {
+    "globs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

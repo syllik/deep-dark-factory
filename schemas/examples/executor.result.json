@@ -1,0 +1,16 @@
+{
+  "schema": "ddf.executor.result/v1",
+  "verdict": "COMPLETE",
+  "summary": "Added docs/glossary.md with 24 alphabetically sorted terms, each linking to its concept page; recorded the adapter-names default in the decision log.",
+  "verify": {
+    "commands": ["npm ci", "npm run verify"],
+    "passed": true
+  },
+  "decisionsWritten": ["AGENT-DEFAULT: glossary includes one entry per V1 adapter"],
+  "wontFix": [
+    {
+      "findingId": "r1-3",
+      "reason": "The term is defined in the spec only; the acceptance criteria limit the glossary to docs/concepts."
+    }
+  ]
+}

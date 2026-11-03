@@ -1,0 +1,13 @@
+# Example <operator-config>/routing.yaml (schema ddf.routing/v1, spec section 7.2)
+# All model names below are EXAMPLES only; choose your own per provider.
+tiers:
+  deep:     [{adapter: claude-code, model: opus-5.5, effort: high}]          # example model
+  standard: [{adapter: claude-code, model: opus-5.5, effort: medium},        # example model
+             {adapter: opencode, model: "<provider/model>"}]                 # fallback on rate limit
+  routine:  [{adapter: claude-code, model: sonnet-5.5, effort: medium}]      # example model
+  fast:     [{adapter: claude-code, model: haiku-5.5, effort: low}]          # example model
+roles:
+  r2: {prefer: [{adapter: opencode, model: "<other-provider/model>"}]}       # optional
+limits:
+  maxConcurrentContainers: 2     # every container counts: Executor, each reviewer, local gate, forge-local CI
+  maxSubagentsPerRun: 3          # advisory, passed to the agent; not enforceable by the CLIs

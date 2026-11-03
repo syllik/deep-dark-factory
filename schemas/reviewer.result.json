@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ddf.reviewer.result/v1",
+  "title": "DDF Reviewer result (R1 correctness, R2 security/data)",
+  "description": "Written by a reviewer to /out/result.json. Blocking findings (spec section 6.3): severity P0 or P1, securityLevel High or Medium, or category hard-stop. APPROVE is valid only with zero blocking findings and no hard-stop checklist hit.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "role", "verdict", "findings"],
+  "properties": {
+    "schema": { "const": "ddf.reviewer.result/v1" },
+    "role": { "enum": ["r1", "r2"] },
+    "verdict": { "enum": ["APPROVE", "REQUEST_CHANGES"] },
+    "raiseRisk": { "enum": ["standard", "sensitive"] },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "hardStopChecklist": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["item", "status"],
+        "properties": {
+          "item": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["clear", "hit"] }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "role": { "const": "r2" } } },
+      "then": {
+        "required": ["hardStopChecklist"],
+        "properties": { "hardStopChecklist": { "minItems": 1 } }
+      }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "APPROVE" } } },
+      "then": {
+        "properties": {
+          "findings": { "items": { "not": { "$ref": "#/$defs/blockingFinding" } } },
+          "hardStopChecklist": {
+            "items": { "properties": { "status": { "const": "clear" } } }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "severity", "category", "evidence"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "severity": { "enum": ["P0", "P1", "P2", "P3"] },
+        "category": {
+          "enum": ["correctness", "acceptance", "security", "data", "hard-stop", "docs"]
+        },
+        "securityLevel": { "enum": ["High", "Medium", "Low"] },
+        "evidence": { "type": "string", "minLength": 1 },
+        "location": { "type": "string", "minLength": 1 },
+        "fixHint": { "type": "string", "minLength": 1 }
+      }
+    },
+    "blockingFinding": {
+      "anyOf": [
+        {
+          "required": ["severity"],
+          "properties": { "severity": { "enum": ["P0", "P1"] } }
+        },
+        {
+          "required": ["securityLevel"],
+          "properties": { "securityLevel": { "enum": ["High", "Medium"] } }
+        },
+        {
+          "required": ["category"],
+          "properties": { "category": { "const": "hard-stop" } }
+        }
+      ]
+    }
+  }
+}

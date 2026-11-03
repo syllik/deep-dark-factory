@@ -1,0 +1,31 @@
+{
+  "schema": "ddf.reviewer.result/v1",
+  "role": "r1",
+  "verdict": "REQUEST_CHANGES",
+  "findings": [
+    {
+      "id": "r1-1",
+      "severity": "P1",
+      "category": "acceptance",
+      "evidence": "Acceptance criterion 2 requires every term to link to docs/concepts; the entry for 'zone' has no link.",
+      "location": "docs/glossary.md:41",
+      "fixHint": "Link 'zone' to docs/concepts/lifecycle.md."
+    },
+    {
+      "id": "r1-2",
+      "severity": "P3",
+      "category": "docs",
+      "evidence": "Entries 'Publisher' and 'publisher' differ only in case.",
+      "location": "docs/glossary.md:58"
+    }
+  ],
+  "hardStopChecklist": [
+    { "item": "secrets and credentials", "status": "clear" },
+    { "item": "deploy and infrastructure", "status": "clear" },
+    { "item": "real money", "status": "clear" },
+    { "item": "destructive data operations", "status": "clear" },
+    { "item": "forge or repository settings", "status": "clear" },
+    { "item": "other repositories", "status": "clear" },
+    { "item": "purchases", "status": "clear" }
+  ]
+}
