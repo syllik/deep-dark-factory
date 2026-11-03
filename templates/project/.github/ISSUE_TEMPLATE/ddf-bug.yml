@@ -1,0 +1,34 @@
+name: Bug
+description: Something does not work as expected. A maintainer may hand it to DDF later.
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Filing this form does not start DDF. Do not paste secrets, tokens or personal data.
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps, commands or input.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Version, branch or commit, and anything else relevant.
+    validations:
+      required: false

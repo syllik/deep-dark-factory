@@ -1,0 +1,30 @@
+name: DDF request
+description: Ask for an outcome; the DDF Planner turns an accepted request into tasks.
+title: "request: "
+labels: ["ddf:request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This request stays inert until an allow-listed maintainer adds the `ddf` label or comments `/ddf`.
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      description: The outcome you want, in plain words.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: The problem or need behind it.
+    validations:
+      required: true
+  - type: textarea
+    id: done-when
+    attributes:
+      label: Done when
+      description: Observable conditions that mean the request is fulfilled.
+    validations:
+      required: true
