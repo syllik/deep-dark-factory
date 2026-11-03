@@ -10,7 +10,7 @@
     "tiers": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["standard"],
+      "required": ["deep", "standard"],
       "properties": {
         "deep": { "$ref": "#/$defs/entries" },
         "standard": { "$ref": "#/$defs/entries" },

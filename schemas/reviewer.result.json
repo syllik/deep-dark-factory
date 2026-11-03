@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ddf.reviewer.result/v1",
   "title": "DDF Reviewer result (R1 correctness, R2 security/data)",
-  "description": "Written by a reviewer to /out/result.json. Blocking findings (spec section 6.3): severity P0 or P1, securityLevel High or Medium, or category hard-stop. APPROVE is valid only with zero blocking findings and no hard-stop checklist hit.",
+  "description": "Written by a reviewer to /out/result.json. Blocking findings (spec section 6.3): severity P0 or P1, securityLevel High or Medium, or category hard-stop. APPROVE is valid only with zero blocking findings and every hard-stop checklist item clear. REQUEST_CHANGES requires at least one blocking finding or a checklist hit. A security finding must carry securityLevel. A checklist item that could not be assessed is unassessed (never clear) and comes with a blocking finding stating what could not be assessed.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "role", "verdict", "findings"],
@@ -23,7 +23,7 @@
         "required": ["item", "status"],
         "properties": {
           "item": { "type": "string", "minLength": 1 },
-          "status": { "enum": ["clear", "hit"] }
+          "status": { "enum": ["clear", "hit", "unassessed"] }
         }
       }
     }
@@ -46,6 +46,25 @@
           }
         }
       }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "REQUEST_CHANGES" } } },
+      "then": {
+        "anyOf": [
+          {
+            "required": ["findings"],
+            "properties": { "findings": { "contains": { "$ref": "#/$defs/blockingFinding" } } }
+          },
+          {
+            "required": ["hardStopChecklist"],
+            "properties": {
+              "hardStopChecklist": {
+                "contains": { "properties": { "status": { "const": "hit" } } }
+              }
+            }
+          }
+        ]
+      }
     }
   ],
   "$defs": {
@@ -63,7 +82,9 @@
         "evidence": { "type": "string", "minLength": 1 },
         "location": { "type": "string", "minLength": 1 },
         "fixHint": { "type": "string", "minLength": 1 }
-      }
+      },
+      "if": { "properties": { "category": { "const": "security" } } },
+      "then": { "required": ["securityLevel"] }
     },
     "blockingFinding": {
       "anyOf": [

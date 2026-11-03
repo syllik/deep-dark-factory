@@ -32,15 +32,16 @@
       "additionalProperties": false,
       "properties": {
         "minFreeDiskGb": {
-          "description": "Below this free disk space no new runs start.",
+          "description": "Operator floor: below this free disk space no new runs start. Default is the product default (15); 0 is rejected because it would disable the guard.",
           "type": "integer",
-          "minimum": 0,
+          "minimum": 1,
           "default": 15
         },
         "maxRunsPerTask": {
-          "description": "Agent runs per task, all roles.",
+          "description": "Agent runs per task, all roles. The operator may only lower the product bound (spec section 5.3).",
           "type": "integer",
           "minimum": 1,
+          "maximum": 20,
           "default": 20
         }
       }

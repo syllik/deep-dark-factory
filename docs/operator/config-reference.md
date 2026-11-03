@@ -16,7 +16,7 @@ Maps tiers and roles to agent adapters and models. Selection and fallback rules:
 
 | Key | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `tiers` | object | yes | none | keys `deep`, `standard`, `routine`, `fast` |
+| `tiers` | object | yes | none | keys `deep`, `standard`, `routine`, `fast`; `deep` and `standard` required |
 | `roles` | object | no | none | per-role preferences, tried before the role's tier entries |
 | `limits` | object | no | none | concurrency limits |
 
@@ -24,7 +24,7 @@ Maps tiers and roles to agent adapters and models. Selection and fallback rules:
 
 | Key | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `tiers.deep` | list of entries (min 1) | no | none | |
+| `tiers.deep` | list of entries (min 1) | yes | none | `sensitive` tasks (Planner, R1, R2 at `deep`) |
 | `tiers.standard` | list of entries (min 1) | yes | none | the default tier of every role |
 | `tiers.routine` | list of entries (min 1) | no | none | reports and digests |
 | `tiers.fast` | list of entries (min 1) | no | none | read-only helpers |
@@ -63,6 +63,8 @@ Entries are tried in order; a rate-limited entry cools until its reset time.
 ```yaml
 # Model names are EXAMPLES only.
 tiers:
+  deep:
+    - {adapter: claude-code, model: example-model-a, effort: high}
   standard:
     - {adapter: claude-code, model: example-model-a, effort: medium}
     - {adapter: opencode, model: "<provider/model>"}   # fallback on rate limit
@@ -118,8 +120,8 @@ The Telegram bot token is a secret and lives in the secrets directory, not here.
 
 | Key | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `limits.minFreeDiskGb` | integer ≥ 0 | no | 15 | below this free disk space no new runs start |
-| `limits.maxRunsPerTask` | integer ≥ 1 | no | 20 | agent runs per task, all roles ([lifecycle.md](../concepts/lifecycle.md#bounds)) |
+| `limits.minFreeDiskGb` | integer ≥ 1 | no | 15 | operator floor: below this free disk space no new runs start; 0 is rejected because it would disable the guard |
+| `limits.maxRunsPerTask` | integer 1–20 | no | 20 | agent runs per task, all roles ([lifecycle.md](../concepts/lifecycle.md#bounds)); the operator may only lower the product bound |
 
 ### Example
 
@@ -133,7 +135,7 @@ projects:
   - id: offline-fixture
     forge: local
     remote: file:///srv/git/offline-fixture.git
-    maxAutonomy: merge-integration
+    maxAutonomy: propose          # D1: only DDF itself and one pilot get merge-integration
 notifications:
   telegram: {userId: "100000001", chatId: "100000001"}   # placeholders
 limits:
@@ -144,4 +146,4 @@ limits:
 ## Not in these files
 
 - GitHub App IDs belong to the operator layer ([spec §3](../specs/2026-11-03-ddf-v1-design.md#3-configuration-layers)) but are not part of the `ddf.projects/v1` or `ddf.routing/v1` schemas; their location is fixed with `ddf apps create` in M4.
-- Run timeouts, CI wait and correction-batch bounds are product defaults ([lifecycle.md](../concepts/lifecycle.md#bounds)), not operator keys in V1.
+- Run timeouts, CI wait, CI-fix, correction-batch and sync-batch bounds are product defaults ([lifecycle.md](../concepts/lifecycle.md#bounds)), not operator keys in V1. The only bound an operator sets is `limits.maxRunsPerTask`, and only downwards.

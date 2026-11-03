@@ -16,7 +16,7 @@ Schema (canonical): [`schemas/project.json`](../../schemas/project.json) (`ddf.p
 | `integrationBranch` | string, non-empty | yes | none |
 | `autonomy` | `propose` \| `merge-integration` | no | `propose` |
 | `verify` | list of non-empty strings, min 1 | yes | none |
-| `checks.required` | list of non-empty strings | no | none |
+| `checks.required` | list of non-empty strings, min 1 | no | none |
 | `image` | string, non-empty | no | none (default base image) |
 | `risk.lowMaxLines` | integer ≥ 0 | no | 200 |
 | `risk.docs` | list of globs | no | none |
@@ -71,7 +71,7 @@ verify:
 
 ### `checks.required`
 
-Forge check names the merge gate requires on the current head. Without a list: at least one check run, all successful ([policy.md](../concepts/policy.md#merge-gate)).
+Forge check names the merge gate requires on the current head; the list needs at least one name (an empty list is rejected). Omit the key to mean: at least one check run, all successful ([policy.md](../concepts/policy.md#merge-gate)).
 
 ```yaml
 checks:

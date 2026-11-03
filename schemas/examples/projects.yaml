@@ -9,7 +9,7 @@ projects:
   - id: offline-fixture
     forge: local
     remote: file:///srv/git/offline-fixture.git
-    maxAutonomy: merge-integration
+    maxAutonomy: propose                  # D1: only DDF itself and one pilot get merge-integration
 notifications:
   telegram:
     userId: "100000001"              # placeholder

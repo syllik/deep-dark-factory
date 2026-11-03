@@ -26,6 +26,6 @@ Status: implemented in M2
 ## Rules
 
 - The host never runs repository content: CI is the profile's `verify` in a fresh container, as are the local gate and the Executor's verify ([identity.md](../concepts/identity.md#workspaces-and-publication)).
-- A compare-and-swap ref update fails if the integration branch head moved after gate evaluation; the task returns to `ci` for the new head.
+- The compare-and-swap ref update expects the integration branch's old SHA and checks that the change head still equals the evaluated head. A moved integration branch → refusal `behind base` → sync; a moved change head → `ci` for the new head.
 - The same lifecycle, bounds and policy apply as on any forge ([lifecycle.md](../concepts/lifecycle.md), [policy.md](../concepts/policy.md)); hard stops and path policy still go to the owner.
 - Owner answers come through `ddf answer` or the configured Telegram user.

@@ -22,10 +22,11 @@ Sandbox port: create/run/kill a container with mounts, limits and network rules.
 
 | Run | Read-only | Writable |
 |---|---|---|
-| Agent run (Planner, Executor, reviewers) | brief, role bundle | the run's workspace copy (own `.git`, no remotes, no credentials), `/out` |
+| Executor run | brief, role bundle | the run's workspace copy (own `.git`, no remotes, no credentials), `/out` |
+| Planner and reviewer runs | brief, role bundle, the run's workspace copy (own `.git`, no remotes, no credentials) | `/out` only |
 | Local gate, `forge-local` CI | none beyond the image | the applied tree copy |
 
-Reviewers get the workspace copy but only read/search tools ([roles.md](../concepts/roles.md#reviewer-correctness)). After the Executor, the adapter's trusted wrapper writes `/out/change.patch` ([identity.md](../concepts/identity.md#workspaces-and-publication)).
+Planner and reviewers get the workspace copy read-only and only read/search tools ([roles.md](../concepts/roles.md#reviewer-correctness)). After the Executor, the adapter's trusted wrapper writes `/out/change.patch` ([identity.md](../concepts/identity.md#workspaces-and-publication)).
 
 ## Capacity
 

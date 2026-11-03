@@ -70,7 +70,7 @@ Exact file names are fixed by `ddf setup` in M5.
 
 ## M0 recipe
 
-The verified, step-by-step commands for this host setup (colima under a non-login service user via launchd, resource limits, VM firewall, coexistence with other users' services) are pending `docs/research/2026-11-m0-facts.md` ([spec §16](../specs/2026-11-03-ddf-v1-design.md#16-facts-to-verify-in-m0), item 5). Until those facts are recorded, follow only the target order above and do not treat any command as verified.
+The verified, step-by-step commands for this host setup (colima under a non-login service user via launchd, resource limits, VM firewall, coexistence with other users' services) are pending the M0 answers recorded in `.ai/decisions.md` ([spec §16](../specs/2026-11-03-ddf-v1-design.md#16-facts-to-verify-in-m0), item 5); detailed evidence will be in docs/research/ once the M0 findings are merged. Until those facts are recorded, follow only the target order above and do not treat any command as verified.
 
 ## Related
 

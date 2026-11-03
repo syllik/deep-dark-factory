@@ -122,25 +122,36 @@ for (const file of canon) {
   });
 }
 
-// (d) forbidden-paths block in policy.md equals the spec block.
+// (d) every marked forbidden-paths block equals the spec block, byte for byte per line.
+// Checked: docs/concepts/policy.md (block required) and every other Markdown file
+// under docs/ and prompts/ that contains a sync:forbidden marker.
+const OPEN = '<!-- sync:forbidden -->';
+const CLOSE = '<!-- /sync:forbidden -->';
 function syncBlock(r) {
   const abs = join(root, r);
   if (!existsSync(abs)) { report(`SYNC_DRIFT ${r}:0 file missing`); return null; }
   const all = lines(read(abs));
-  const start = all.findIndex((l) => l.trim() === '<!-- sync:forbidden -->');
-  const end = all.findIndex((l, i) => i > start && l.trim() === '<!-- /sync:forbidden -->');
+  const start = all.findIndex((l) => l === OPEN);
+  const end = all.findIndex((l, i) => i > start && l === CLOSE);
   if (start === -1 || end === -1) { report(`SYNC_DRIFT ${r}:0 missing sync:forbidden markers`); return null; }
-  return { start, items: all.slice(start + 1, end).map((l) => l.trim()) };
+  return { start, items: all.slice(start + 1, end) };
 }
 const policyPath = 'docs/concepts/policy.md';
 const specPath = 'docs/specs/2026-11-03-ddf-v1-design.md';
-const policy = syncBlock(policyPath);
 const spec = syncBlock(specPath);
-if (policy && spec) {
-  const n = Math.max(policy.items.length, spec.items.length);
+const syncTargets = new Set([policyPath]);
+for (const file of [...walk(join(root, 'docs')), ...walk(join(root, 'prompts'))]) {
+  const r = rel(file);
+  if (r === specPath || !r.endsWith('.md')) continue;
+  if (lines(read(file)).some((l) => l.trim() === OPEN || l.trim() === CLOSE)) syncTargets.add(r);
+}
+for (const target of [...syncTargets].sort()) {
+  const block = syncBlock(target);
+  if (!block || !spec) continue;
+  const n = Math.max(block.items.length, spec.items.length);
   for (let i = 0; i < n; i++) {
-    if (policy.items[i] !== spec.items[i]) {
-      report(`SYNC_DRIFT ${policyPath}:${policy.start + 2 + i} expected ${JSON.stringify(spec.items[i] ?? '<end of block>')}`);
+    if (block.items[i] !== spec.items[i]) {
+      report(`SYNC_DRIFT ${target}:${block.start + 2 + i} expected ${JSON.stringify(spec.items[i] ?? '<end of block>')}`);
       break;
     }
   }

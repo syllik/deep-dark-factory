@@ -68,7 +68,7 @@ App private keys live in the secrets directory ([setup.md](../operator/setup.md#
 ## Merge
 
 - Squash merge with the `sha` parameter set to the evaluated head; a moved head fails the merge.
-- Any GitHub read error, unknown mergeable state or pending check → refusal (fail-closed) and backoff ([lifecycle.md](../concepts/lifecycle.md#merge-refusals)).
+- Any GitHub read error or unknown mergeable state → refusal (fail-closed) and backoff ([lifecycle.md](../concepts/lifecycle.md#merge-refusals)).
 - Revert: a revert pull request of class `revert`, opened by the `worker` App, and the task is reopened.
 
 ## Facts verified in M0
