@@ -46,6 +46,7 @@ Every exceeded [bound](../concepts/lifecycle.md#bounds), [hard stop](../concepts
 | Executor `BLOCKED` | running | relay the missing fact or decision; if it needs a forbidden-path or settings change, the owner makes it on the integration branch first |
 | Hard stop | policy, reviewer checklist | owner decides; the change continues at `propose` (human merge) whatever the answer |
 | Path policy | publishing, merge gate | owner makes the forbidden-path change themselves or rejects the task; the change continues at `propose` |
+| Base changed workflow files | sync with base | owner updates the change branch from the base by hand, then answers "resume"; the new head gets a full re-review ([lifecycle.md#sync-with-base](../concepts/lifecycle.md#sync-with-base)) |
 | Same finding blocking twice | fixing | owner rules on the finding: accept the "won't fix", or give direction for one more batch |
 | Bound exceeded (timeouts, invalid results, CI-fix, correction, sync, run budget) | any | owner chooses: retry with guidance, split the task, or close it |
 | CI wait over 2 h | ci | owner checks the project's CI health; answer "retry" once CI runs again |
@@ -56,7 +57,7 @@ Not `needs-owner`, but reported:
 
 | Situation | Action |
 |---|---|
-| Global pause (credential failure, container runtime down, second DDF-attributed red within 24 h) | report the reason; owner fixes the cause; `ddf resume` only with the owner's approval |
+| Global pause (a set of reasons: `owner`, `credential`, `revert-red`, `runtime`, `security`; [lifecycle.md#global-pause](../concepts/lifecycle.md#global-pause)) | report every reason; `runtime` lifts automatically once the runtime is healthy again; for the others the owner fixes the cause; `ddf resume` only with the owner's approval |
 | Rate limit, no routing entry left | tasks wait; nothing to do until the reset time |
 | Free disk below floor | report; owner frees space |
 | Change set to draft or closed by a human (`hold`) | report; the owner reopens or closes the task |

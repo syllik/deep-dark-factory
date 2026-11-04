@@ -137,7 +137,7 @@ Routing of findings ([policy.md#findings](../concepts/policy.md#findings), [life
 
 One batch = one executor brief addressing **all** blocking findings (the executor may answer "won't fix + reason" in `wontFix`). Then step 5 (new commit, push); **after the push**, once the new head SHA exists, post the result's `wontFix` list on the PR as one comment headed `DDF wontFix @ <new head SHA>` (empty list: "none"). Then step 6, and a **full re-review** of the new head by every required reviewer, given both the prior findings and the `wontFix` list as untrusted data. At most **3 batches** per PR. The same finding (`role`, `category`, `location`, problem) blocking twice → `needs-owner`.
 
-**Behind base:** merge the integration branch into the PR branch (a merge commit, never a rebase) and push, then step 6 **and** a full re-review of the new head (step 7). Conflicts → an executor sync batch (at most 2), then step 6 and full re-review.
+**Behind base:** first check whether the base changed workflow files since the merge base (`git diff --name-only <merge-base> origin/<integration-branch> -- .github/workflows`; other forges: their CI config paths). If it did, **stop** → `needs-owner` with the reason "base changed workflow files; update the branch manually": the owner updates the branch; no sync batch is consumed, and the resulting human commit means a full re-review of the new head (step 6, then step 7). Otherwise merge the integration branch into the PR branch (a merge commit, never a rebase) and push, then step 6 **and** a full re-review of the new head (step 7). Conflicts → an executor sync batch (at most 2), then step 6 and full re-review ([lifecycle.md#sync-with-base](../concepts/lifecycle.md#sync-with-base)).
 
 ### 9. Hand to the human (`merge`)
 
@@ -216,6 +216,7 @@ Exceeding any bound → `needs-owner`.
 - **Gate refusals that map to `needs-owner`** ([lifecycle.md#merge-refusals](../concepts/lifecycle.md#merge-refusals)): path policy or hard stop.
 - Planner `ASK`, `REJECT`, or more children than `maxAutoChildren`.
 - Executor `BLOCKED` that a better brief cannot fix.
+- The base changed workflow files while the PR is behind ([step 8](#8-correction-batches-fixing), Behind base).
 - Any [bound](#bounds) exceeded; the same finding blocking twice; a flaky test seen in two changes (quarantine proposal, never auto-executed).
 - A PR closed or set to draft by a human, or the task closed: do nothing further on it.
 

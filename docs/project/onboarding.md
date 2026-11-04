@@ -61,3 +61,4 @@ These edits touch forbidden paths and are part of the human-merged onboarding ch
 
 - Mark tasks for DDF with the `ddf` label or a `/ddf` comment as an allow-listed actor, or use `ddf ask <project> "<text>"`.
 - Without the daemon, run tasks by [manual-mode.md](../orchestrator/manual-mode.md).
+- When the integration branch changes CI configuration (GitHub: `.github/workflows/**`), DDF cannot bring it into an open change branch: such changes go to `needs-owner` and the owner updates the branch by hand; the new head is fully re-reviewed ([lifecycle.md](../concepts/lifecycle.md#sync-with-base)).

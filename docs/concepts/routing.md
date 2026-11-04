@@ -37,7 +37,7 @@ limits:
 
 1. A role resolves to a tier (default from [roles.md](roles.md), raised by risk class or project).
 2. Entries of the tier are tried in order; a `roles.<role>.prefer` list is tried first when present.
-3. A rate-limited entry is marked cooling until its reset time; the next entry of the tier is used.
+3. A rate-limited entry (HTTP 429 only) is marked cooling until its reset time; the next entry of the tier is used. Other retryable errors back off on the same entry; an authentication failure is a credential failure, not a fallback ([Agent adapter contract](#agent-adapter-contract)).
 4. With no entry left, the task waits and one notification is sent (once per reset window).
 
 ## Limits
@@ -57,5 +57,10 @@ Every agent adapter implements `run(role, brief, workspace, limits) → result` 
 4. Outputs: `/out/result.json`, validated against `schemas/<role>.result.json` (missing or invalid → failed run, bounded by [lifecycle.md](lifecycle.md#bounds)); for the Executor also `/out/change.patch`.
 5. Records model ID, token usage and cost from the CLI output into the journal.
 6. Role prompts live once in `prompts/`; each adapter renders them into the CLI's native form in a directory outside the workspace.
+7. **Pinned CLIs.** The base image records exact CLI versions; the adapter refuses an unknown version.
+8. **No run-time installs.** A run in which any package-registry install happens at run time fails.
+9. Each container receives only the credential of its routed adapter. All agent-originated output passes the redaction of §8.4 before any forge write or notification ([lifecycle.md](lifecycle.md#publishing)).
+10. Every call passes an explicit model from routing (never a CLI default or a free fallback model) and runs under a wall-clock timeout.
+11. **Failure classification** is deterministic: authentication failure → credential failure (global pause, reason `credential`; [lifecycle.md](lifecycle.md#global-pause)), never retried; only HTTP 429 is a rate limit → the next routing entry; other retryable errors (5xx) → backoff on the same entry, not fallback.
 
-V1 adapters: `agent-claude-code`, `agent-opencode` (decision D3). Exact CLI flags are verified in M0 ([spec §16](../specs/2026-11-03-ddf-v1-design.md#16-facts-to-verify-in-m0)).
+V1 adapters: `agent-claude-code`, `agent-opencode` (decision D3). The verified isolation switches, versions and error fields per CLI: [agent-claude-code.md](../adapters/agent-claude-code.md), [agent-opencode.md](../adapters/agent-opencode.md); full command lines and evidence in [the M0 facts](../research/2026-11-m0-facts.md#recommended-adapter-command-lines).

@@ -82,7 +82,7 @@ Rationale: [spec §6.5](../specs/2026-11-03-ddf-v1-design.md#65-path-policy).
 1. effective autonomy is `merge-integration`; no global pause;
 2. task state is `merge`; no `needs-owner`/`hold` flag; the change never hit a hard stop or path policy;
 3. change open, not draft;
-4. every reviewer required by the risk class has a valid signed review with verdict APPROVE and zero blocking findings, for the current head **or** for an ancestor head where every later commit is a base merge the daemon itself created (its SHA recorded in the store from the daemon's own intent; author metadata does not count) and `git patch-id --verbatim` of the change is unchanged;
+4. every reviewer required by the risk class has a valid signed review with verdict APPROVE and zero blocking findings, for the current head **or** for an ancestor head where every later commit is a base merge the daemon itself created (its SHA recorded in the store from the daemon's own intent; author metadata does not count) and `git patch-id --verbatim` of the change is unchanged; a base merge made by anyone else (e.g. a human "Update branch") never qualifies;
 5. every check in the profile's `checks.required` is present and successful on the current head (with no list: at least one check run, all successful);
 6. path policy passes;
 7. change not behind base and mergeable;

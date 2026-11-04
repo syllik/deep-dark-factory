@@ -33,12 +33,12 @@ There is no `frontier` key: DDF never selects `frontier`, so it is not routable 
 
 ### Entry
 
-Entries are tried in order; a rate-limited entry cools until its reset time.
+Entries are tried in order; a rate-limited entry (HTTP 429 only) cools until its reset time. The adapter always passes `model` explicitly to the CLI (never a CLI default or a free fallback model; [routing.md](../concepts/routing.md#agent-adapter-contract)).
 
 | Key | Type | Required | Default | Allowed values |
 |---|---|---|---|---|
 | `adapter` | string | yes | none | pattern `^[a-z][a-z0-9-]*$`; V1 adapters: `claude-code`, `opencode` |
-| `model` | string | yes | none | non-empty; provider model identifier |
+| `model` | string | yes | none | non-empty; provider model identifier (`opencode`: `<provider>/<model>`) |
 | `effort` | string | no | none | `low` \| `medium` \| `high` |
 
 ### `roles`

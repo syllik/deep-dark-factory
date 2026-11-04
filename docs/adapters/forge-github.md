@@ -59,6 +59,8 @@ App private keys live in the secrets directory ([setup.md](../operator/setup.md#
 - The `worker` App pushes one commit per revision to the change branch (no force-push, rebase or amend) and opens or updates the pull request.
 - The body comes from the project's `change.template`; agent text appears only in the sanitized section; `Closes <task>` is added by DDF only for the task itself ([roles.md](../concepts/roles.md#publisher)).
 - Update from base: a daemon-authored merge of the base into the branch; its SHA is recorded from the daemon's own intent.
+- **Workflow files in the base:** before any sync or publish that brings base changes into the branch (the clean merge, or the push of an Executor sync batch), the daemon runs `git diff --name-only <merge-base> <base> -- .github/workflows`. A non-empty result means the `worker` App (no `workflows` permission) may not write them, so no GitHub call is made: → `needs-owner` with the reason "base changed workflow files; update the branch manually", and the sync batch is not consumed. A 403 "… without `workflows` permission" is only a fallback signal with the same outcome ([lifecycle.md](../concepts/lifecycle.md#sync-with-base)).
+- A human "Update branch" is not a daemon-created base merge: the new head needs a full re-review ([policy.md](../concepts/policy.md#merge-gate) condition 4).
 
 ## Reviews
 
@@ -73,8 +75,8 @@ App private keys live in the secrets directory ([setup.md](../operator/setup.md#
 
 ## Facts verified in M0
 
-These GitHub behaviours are open until recorded in M0 ([spec §16](../specs/2026-11-03-ddf-v1-design.md#16-facts-to-verify-in-m0)):
+Answers recorded in M0 ([spec §16](../specs/2026-11-03-ddf-v1-design.md#16-facts-to-verify-in-m0); evidence in [M0 facts](../research/2026-11-m0-facts.md#github)):
 
-1. whether an App approval counts toward a ruleset's required approvals (fallback: machine users, subject to GitHub's terms);
-2. installation token narrowing (repository and permission subset) for all three Apps;
-3. whether `update-branch` or a pushed base merge is rejected when the base contains workflow-file changes and the App lacks `workflows`.
+1. whether an App approval counts toward a ruleset's required approvals: unverified (terms documented); M4 probe `app-approval-counts` (reviewer App with `pull_requests: write`, also `contents: read`/`write` variants); fallback machine users (≤ 1 free machine account per person under GitHub's terms);
+2. installation token narrowing (repository and permission subset) for all three Apps: documented, supported as above (repository IDs + permission subset, ≤ 1 h); M4 probe `token-narrowing`;
+3. `update-branch` or a pushed base merge when the base contains workflow-file changes and the App lacks `workflows`: unverified, rejected with 403 per a third-party report (pushed merge inferred); handled by the deterministic check under [Changes](#changes); M4 probe `sync-with-workflow-change`.

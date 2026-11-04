@@ -12,7 +12,7 @@ Rationale and full design: [spec §5](../specs/2026-11-03-ddf-v1-design.md#5-tas
 inbox → planning → ready → running → publishing → ci → review → merge → done
                      ↑                              ↑            │
                   waiting                           └─ fixing ←──┘
-flags (off the conveyor): needs-owner, hold, failed; global: paused
+flags (off the conveyor): needs-owner, hold, failed; global: paused (reasons: owner, credential, revert-red, runtime, security; §9)
 ```
 
 The store is canonical; forge labels are only a projection ([spec §10.2](../specs/2026-11-03-ddf-v1-design.md#102-forge-github)).
@@ -83,6 +83,11 @@ The [Publisher](roles.md#publisher) (trusted code):
 
 The Publisher writes the change body and squash message from a template; agent text appears only in a sanitized section (closing keywords, `[skip ci]`-style directives and mentions stripped); `Closes <task>` is added by DDF only for the task itself. Local gate failure → back to the Executor as a correction batch.
 
+- **Redaction before publication.** Before every forge write and every notification send, all agent-originated text (review projection comments, change body, commit message, patch content, Telegram messages) is redacted by secret patterns and by the exact values of the secrets loaded into that run's container. A patch containing a loaded secret value is refused: hard stop `secrets` ([policy.md](policy.md#hard-stops)), failed run.
+- The Publisher refuses a patch that adds a `.opencode/` or `.claude/` path (already a [forbidden path](policy.md#forbidden-paths)) or any `node_modules/` path unless the project profile allows it: failed run, with the reason in the journal.
+
+Rationale: [spec §8.3](../specs/2026-11-03-ddf-v1-design.md#83-workspaces-and-publication), [spec §8.4](../specs/2026-11-03-ddf-v1-design.md#84-containers).
+
 ### ci
 
 - Required checks ([policy.md](policy.md#merge-gate) condition 5) run on the current head. For `forge-local` the daemon runs verify in a fresh container as CI.
@@ -110,6 +115,9 @@ The Publisher writes the change body and squash message from a template; agent t
 
 - Behind and clean → the daemon merges the base into the branch (a daemon-authored merge commit).
 - Conflict → an Executor sync batch, then full re-review.
+- **Workflow files in the base:** before any sync or publish that brings base changes into the branch (the daemon's clean merge, or the push of an Executor sync batch in the conflict case), the daemon checks deterministically whether the base changed CI configuration since the merge base (GitHub: `git diff --name-only <merge-base> <base> -- .github/workflows`; other forges: their CI config paths). If it did, the `worker` App may not write them (GitHub: no `workflows` permission, [identity.md](identity.md#github-apps)), so no forge call is made: → `needs-owner` with the reason "base changed workflow files; update the branch manually", and the sync batch is not consumed.
+- A forge refusal of the same kind (GitHub: 403 "… without `workflows` permission") is only a fallback signal and maps to the same outcome.
+- A branch update made by a human is not a daemon-created base merge, so the new head goes through full re-review ([policy.md](policy.md#merge-gate) condition 4).
 
 ### merge
 
@@ -118,7 +126,7 @@ The Publisher writes the change body and squash message from a template; agent t
 ### revert
 
 - If the integration branch's CI is red on the DDF merge commit itself (after one rerun), DDF opens a revert change of risk class `revert` and reopens the task.
-- A second DDF-attributed red within 24 h, across the project → global pause and Telegram alert.
+- A second DDF-attributed red within 24 h, across the project → global pause (reason `revert-red`, lifted only by `ddf resume` or `/resume`) and Telegram alert.
 - Red caused by a human merge is not attributed to DDF.
 
 ### owner answers
@@ -141,6 +149,20 @@ Gate refusals map to transitions ([spec §5.2](../specs/2026-11-03-ddf-v1-design
 | task closed by a human | leaves the conveyor; open change left for the human |
 | mergeable state unknown, forge read error | stay, backoff |
 | head moved during merge | `ci` for the new head |
+
+## Global pause
+
+**Global pause** is a set of reasons: `owner` (`ddf pause`, `/pause`), `credential`, `revert-red` (§5.2 Revert), `runtime`, `security`. The daemon is paused while the set is non-empty. Automatic lift clears only `runtime`; every other reason is cleared only by `ddf resume` or `/resume`.
+
+| Reason | Set by | Lifted |
+|---|---|---|
+| `owner` | `ddf pause`, Telegram `/pause` | `ddf resume` / `/resume` |
+| `credential` | agent authentication failure ([routing.md](routing.md#agent-adapter-contract)) | `ddf resume` / `/resume` |
+| `revert-red` | second DDF-attributed red within 24 h ([revert](#revert)) | `ddf resume` / `/resume` |
+| `runtime` | container runtime unavailable after the daemon's own VM restart and firewall re-apply failed | automatically, with a notification, once health check, firewall check and probe pass again |
+| `security` | VM firewall rules missing while no VM restart was observed | `ddf resume` / `/resume` |
+
+Rationale: [spec §9](../specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery), [spec §8.4](../specs/2026-11-03-ddf-v1-design.md#84-containers).
 
 ## Bounds
 
