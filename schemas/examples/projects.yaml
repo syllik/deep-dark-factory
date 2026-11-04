@@ -1,0 +1,19 @@
+# Example <operator-config>/projects.yaml (schema ddf.projects/v1, spec sections 3, 5.1, 9)
+# Secrets (App keys, Telegram token, provider keys) never go here.
+projects:
+  - id: example-app
+    forge: github
+    repository: example-org/example-app   # <owner>/<repo>
+    maxAutonomy: propose                  # effective autonomy = min(this, project request)
+    allowedActors: ["example-maintainer"] # humans whose intake marks and answers are accepted
+  - id: offline-fixture
+    forge: local
+    remote: file:///srv/git/offline-fixture.git
+    maxAutonomy: propose                  # D1: only DDF itself and one pilot get merge-integration
+notifications:
+  telegram:
+    userId: "100000001"              # placeholder
+    chatId: "100000001"              # placeholder
+limits:
+  minFreeDiskGb: 15
+  maxRunsPerTask: 20

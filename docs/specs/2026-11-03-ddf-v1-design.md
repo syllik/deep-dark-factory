@@ -1,6 +1,6 @@
 # Deep Dark Factory V1 — design
 
-Status: **draft for owner review** (2026-11-03), revision 2 after an independent deep review.
+Status: **approved by the owner 2026-11-03** (revision 2 after an independent deep review).
 Supersedes as the V1 architecture: `ARCHITECTURE.md` "Open decisions", `docs/controller-v0-decision.md`, research Issue #1, Issue #8 and draft PR #9.
 Inputs: Issue #12 (decision to consolidate, carried-over requirements, agent identity requirements), the maintainer-approved autonomous-flow design of a private pilot project (2026-10-28), `syllik/codex-local-runner-archive` `docs/DDF-LESSONS.md`, an audit of the existing agent workflow repositories (2026-11-03).
 
@@ -203,12 +203,14 @@ Always `needs-owner`: secrets and credentials, deploy and infrastructure, real m
 ### 6.5 Path policy
 
 Forbidden by default (agents may not change them; owner-only):
+<!-- sync:forbidden -->
 - `.ddf/**`;
 - forge and CI configuration: `.github/**`, `.gitlab-ci.yml`, equivalents;
 - Git behaviour: `.gitmodules`, `.gitattributes`, `.gitignore` of the repository root;
 - agent configuration and instructions: `AGENTS.md`, `CLAUDE.md`, `.claude/**`, `.mcp.json`, `opencode.json`, `.opencode/**`, `.codex/**`, `.cursor/**`;
 - `CODEOWNERS`, `LICENSE`, `.env*`;
 - symbolic links (any added or changed symlink is refused in V1).
+<!-- /sync:forbidden -->
 
 The project's `ciEntrypoints` (scripts and manifests CI relies on, e.g. `package.json`, guard scripts) are not forbidden but force the `sensitive` class, so dependency changes stay possible while CI weakening gets R2 at `deep`.
 

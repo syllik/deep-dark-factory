@@ -8,8 +8,8 @@
 - The architecture has no dependency on a local Mac/self-hosted runner or GitHub Actions product execution. Sources: `AGENTS.md`, `.ai/context.md`, `ARCHITECTURE.md`, Issue #1.
 - Context and token use stay bounded/lazy, with minimal agent calls and bounded correction loops. Sources: `AGENTS.md`, `.ai/context.md`, `ARCHITECTURE.md`, `RESEARCH.md`.
 - Branch roles are fixed: `dungeon-master` production, `master` staging/integration, `slave/<feature>` agent development. Sources: `AGENTS.md`, `.ai/context.md`.
-- 2026-10-22 (owner decision): DDF stays a managed/active `syllik/ai-workflow` project; development follows the generated routing block in `AGENTS.md`. "Standalone" applies only to the DDF product runtime. Sources: `AGENTS.md`.
-- The project remains in research/bootstrap phase; no production engine code is created before the v0 research/migration boundary is accepted. Sources: `AGENTS.md`, `.ai/context.md`, `ARCHITECTURE.md`, `RESEARCH.md`, Issue #1.
+- 2026-10-22 (owner decision): DDF stays a managed/active `syllik/ai-workflow` project; development follows the generated routing block in `AGENTS.md`. "Standalone" applies only to the DDF product runtime. Sources: `AGENTS.md`. (superseded 2026-11-03)
+- The project remains in research/bootstrap phase; no production engine code is created before the v0 research/migration boundary is accepted. Sources: `AGENTS.md`, `.ai/context.md`, `ARCHITECTURE.md`, `RESEARCH.md`, Issue #1. (superseded 2026-11-03)
 
 
 ## Proposed, not yet accepted — standalone DDF controller v0 (2026-10-10)
@@ -20,6 +20,29 @@
 - Actions-first optional backend; dedicated machine and local endpoint supported through adapters. Fenced shared persistence is required for multi-run Actions, not to install DDF generally.
 - Task-wide conservative reservation, no paid call without exact numeric authorization, current published-SHA review, at most two separately authorized corrections and human merge. Exact-deploy not part of controller.
 - Details: [v0 decision](../docs/controller-v0-decision.md). Proposed only; does not lift research-only gate.
+- Superseded by the 2026-11-03 V1 design below.
+
+## 2026-11-03 V1 design
+
+Source: [V1 design](../docs/specs/2026-11-03-ddf-v1-design.md) §2. Supersedes the research-phase entries above where they conflict, including the 2026-10-22 managed-routing decision (see D12).
+
+- Research-only gate lifted by the maintainer (2026-11-03).
+- D1: V1 autonomous merge into the integration branch only for DDF itself and one private pilot product. Every other project starts at `propose` (human merge).
+- D2: V1 host: a macOS workstation under a separate non-admin user; later a server. The core is host-independent.
+- D3: Agent adapters in V1: Claude Code CLI and opencode CLI.
+- D4: Agent roles: Planner, Executor, Reviewer-correctness (R1), Reviewer-security (R2). Trusted non-AI roles: Publisher, Merge-gate. The daemon is the orchestrator.
+- D5: Reviewer count is a policy outcome of the risk class (1 or 2), never a hard-coded constant.
+- D6: Three GitHub Apps: `worker`, `review-correctness`, `review-security`. Fallback if GitHub does not count App approvals: machine users (subject to GitHub terms, §16).
+- D7: Two intake modes: free-form request (Planner creates the tasks) and an existing task marked for DDF.
+- D8: No GitHub Projects board in the core. DDF must work on a plain Git remote.
+- D9: Operator channel: CLI and Telegram.
+- D10: Isolation: one container per run (colima on macOS), no forge credentials inside.
+- D11: Operator config lives in a private per-operator repository or folder; secrets never in Git.
+- D12: The old personal workflow repository is archived after migration; DDF `docs/` becomes the single canon for autonomous and interactive (manual) orchestration.
+- D13: Local workspace cleanup is a separate track before the pilot.
+- D14: Build approach: new core generalized from the 2026-10-28 autonomous-flow design; harvest selected ideas from PR #9; close PR #9 as superseded.
+- D15: Model tiers: `frontier` (never selected automatically), `deep`, `standard`, `routine`, `fast`. Subagents per run: at most 3 by default (advisory, §7.3).
+
 
 ## M0 facts (2026-11)
 

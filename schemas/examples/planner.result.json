@@ -1,0 +1,19 @@
+{
+  "schema": "ddf.planner.result/v1",
+  "verdict": "READY",
+  "spec": "Add a glossary page docs/glossary.md that defines every DDF term used in docs/concepts, one entry per term, alphabetically sorted, each linking to the concept page that uses it.",
+  "acceptance": [
+    "docs/glossary.md exists and starts with a one-line purpose and a Status line",
+    "every term in the glossary links to at least one page under docs/concepts",
+    "the docs consistency check passes"
+  ],
+  "riskProposal": "docs",
+  "zones": [],
+  "dependsOn": [],
+  "agentDefaults": [
+    {
+      "question": "Should the glossary include adapter names?",
+      "choice": "Yes, one entry per V1 adapter, linking to docs/adapters."
+    }
+  ]
+}

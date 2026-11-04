@@ -1,6 +1,7 @@
 # DDF v0 — standalone controller decision
 
-Status: **proposed for review in DDF #1**, not production/live acceptance.
+Status: historical — superseded by docs/specs/2026-11-03-ddf-v1-design.md
+
 Date: 2026-10-10. Source of truth: this repository.
 
 ## Product boundary: no external project dependency
