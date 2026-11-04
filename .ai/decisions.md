@@ -20,3 +20,14 @@
 - Actions-first optional backend; dedicated machine and local endpoint supported through adapters. Fenced shared persistence is required for multi-run Actions, not to install DDF generally.
 - Task-wide conservative reservation, no paid call without exact numeric authorization, current published-SHA review, at most two separately authorized corrections and human merge. Exact-deploy not part of controller.
 - Details: [v0 decision](../docs/controller-v0-decision.md). Proposed only; does not lift research-only gate.
+
+## M0 facts (2026-11)
+
+Source: `docs/research/2026-11-m0-facts.md`. Format: fact → consequence → spec section → confidence → later probe.
+
+- §16.1 App approvals probably count (no direct doc); ≤ 1 free machine account per person → D6 unchanged; machine-user fallback limited to one free machine reviewer → §16 → unverified (terms: documented) → M4 `app-approval-counts`.
+- §16.2 Token narrowing by `repository_ids` + `permissions`, ≤ 1 h; omitting `permissions` widens the token → broker treats any failed narrowing as hard failure → none → documented → M4 `token-narrowing`.
+- §16.3 App without `workflows` gets 403 on `update-branch` (pushed merge likely too) when base changed workflow files → keep withholding `workflows`; refused sync → `needs-owner`, no sync batch used; human branch update → full re-review → §5.2, §6.6 rule 4, §16 → unverified → M4 `sync-with-workflow-change`.
+- §16.4 Both CLIs run non-interactively as non-root; isolation = Claude `--setting-sources ''` + `--strict-mcp-config`, opencode `OPENCODE_*` + `--pure`; opencode npm 1.x and GitHub 2.x incompatible → pin npm 1.x, explicit model, per-call timeout, classify errors from `is_error`/`api_error_status`/`error`; host never runs agent CLIs on a repo copy → §7.3, §8.3, §8.4, §16 → verified (rate-limit shapes unverified) → M3 `cli-version-pin`, `claude-config-isolation`, `opencode-config-isolation`, `*-error-shape`, `*-rate-limit-shape`.
+- §16.5 colima as `ddf` via LaunchDaemon works, limits enforced; VM rules lost on restart, provision hooks fail silently, launchd does not restart the VM → daemon applies/verifies rules before every container start and restarts the VM; global pause only after that fails → §8.1, §8.4, §9, §16 → verified (reboot without login, launchd respawn unverified; owner rerun pending) → M3 `vm-firewall-reapply`, `runtime-recovery`; M5 `colima-boot`.
+- §16.6 `node:sqlite` no warning on Node 24.21.0, stability 1.2 since 24.15.0 → pin Node ≥ 24.15.0, store access only via `store` → §4.4, §16 → verified (stability: documented) → none (M2 store tests).

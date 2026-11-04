@@ -91,7 +91,7 @@ Rules:
 - Trusted code = daemon + adapters on the host. Agents run only inside containers, receive a brief and a workspace copy, and return files in `/out`. They never hold forge credentials or the review-signing key.
 - **The daemon runs only from a maintainer-promoted ref** of this repository (the production branch or a release tag), never from the integration branch. Autonomous merges into DDF's integration branch therefore take effect only after a human promotion.
 - V1 ships as one npm package (`src/core`, `src/adapters`, `src/cli`). Split into packages only when a second consumer exists.
-- Stack: TypeScript on Node 24, Node built-ins first (`node:sqlite`, `node:test`, `fetch`); every dependency needs a recorded reason.
+- Stack: TypeScript on Node 24 (≥ 24.15.0, where `node:sqlite` is a release candidate and emits no warning), Node built-ins first (`node:sqlite`, `node:test`, `fetch`); every dependency needs a recorded reason.
 
 ### 4.5 Store and intents
 
@@ -136,7 +136,7 @@ flags (off the conveyor): needs-owner, hold, failed; global: paused
 
 **Fixing.** One correction batch = one Executor run addressing all blocking findings, then CI, then a full re-review of the new head with prior findings. The Executor may answer a finding "won't fix + reason". A finding is identified across rounds by `{role, category, location, normalized problem}`; the same finding confirmed blocking twice → `needs-owner`.
 
-**Sync with base.** Behind and clean → the daemon merges the base into the branch (a daemon-authored merge commit). Conflict → an Executor sync batch, then full re-review.
+**Sync with base.** Behind and clean → the daemon merges the base into the branch (a daemon-authored merge commit). Conflict → an Executor sync batch, then full re-review. A sync the forge refuses because the base changed workflow files the `worker` App may not write (GitHub: no `workflows` permission, §8.2) → `needs-owner` with the reason "base changed workflow files; update the branch manually", without consuming a sync batch. A branch update made by a human is not a daemon-created base merge, so the new head goes through full re-review (§6.6 rule 4).
 
 **Merge.** `evaluateMerge` passes → squash merge pinned to the reviewed head SHA → DDF closes the task. Gate refusals map to transitions:
 
@@ -221,7 +221,7 @@ Evaluated from the integration branch copy of the profile, never from the change
 1. effective autonomy is `merge-integration`; no global pause;
 2. task state is `merge`; no `needs-owner`/`hold` flag; the change never hit a hard stop or path policy;
 3. change open, not draft;
-4. every reviewer required by the risk class has a valid signed review with verdict APPROVE and zero blocking findings, for the current head **or** for an ancestor head where every later commit is a base merge the daemon itself created (its SHA recorded in the store from the daemon's own intent; author metadata does not count) and `git patch-id --verbatim` of the change is unchanged;
+4. every reviewer required by the risk class has a valid signed review with verdict APPROVE and zero blocking findings, for the current head **or** for an ancestor head where every later commit is a base merge the daemon itself created (its SHA recorded in the store from the daemon's own intent; author metadata does not count) and `git patch-id --verbatim` of the change is unchanged; a base merge made by anyone else (e.g. a human "Update branch") never qualifies;
 5. every check in the profile's `checks.required` is present and successful on the current head (with no list: at least one check run, all successful);
 6. path policy passes;
 7. change not behind base and mergeable;
@@ -299,8 +299,11 @@ Entries are tried in order. A rate-limited entry is marked cooling until its res
 
 ### 7.3 Agent adapter contract
 
-- Non-interactive CLI inside the container, as a non-root user (`claude -p --output-format json …`, `opencode run --agent … --model …`). Permission prompts are disabled inside the container; the container is the security boundary.
-- **Configuration comes only from DDF.** The adapter starts the CLI with DDF's rendered role bundle as the only settings source: project and user settings, hooks, MCP servers and plugins from the workspace are disabled. Project instructions (`AGENTS.md`) reach agents only through the brief, read from the integration branch. M0 verifies the exact flags per CLI (§16).
+- Non-interactive CLI inside the container, as a non-root user (`claude -p --output-format json …`, `opencode run --format json --agent … -m …`). Permission prompts are disabled inside the container; the container is the security boundary.
+- **Pinned CLIs.** Claude Code from npm `@anthropic-ai/claude-code`; opencode from npm `opencode-ai`, 1.x line (verified 1.19.5). opencode's GitHub-release 2.x line has incompatible flags and config schema and is not supported in V1. The base image records exact versions; the adapter refuses an unknown version.
+- **Configuration comes only from DDF.** The adapter starts the CLI with DDF's rendered role bundle as the only settings source: project and user settings, hooks, MCP servers and plugins from the workspace are disabled. Project instructions (`AGENTS.md`) reach agents only through the brief, read from the integration branch. Isolation switches (exact command lines in `docs/research/2026-11-m0-facts.md`): Claude Code `--setting-sources ''` with `--settings <bundle>` and `--strict-mcp-config --mcp-config <bundle>`, brief on stdin; `--tools` restricts built-in tools for reviewers but is not isolation; `--bare` is unusable with a subscription token. opencode: the `OPENCODE_*` environment set from the research doc plus `--pure`.
+- Every call passes an explicit model from routing (never a CLI default or a free fallback model) and runs under a wall-clock timeout.
+- Failures are classified from `is_error`, `api_error_status` and the assistant `error` field (Claude Code; never from `subtype`) or the `error` event's `statusCode`/`isRetryable` (opencode): authentication failure → credential failure (§9), never retried; rate limit → the next routing entry (§7.2).
 - Inputs mounted read-only: brief, role bundle. Outputs: `/out/result.json` (validated against `schemas/<role>.result.json`; missing or invalid → failed run) and, for the Executor, `/out/change.patch`.
 - The adapter records model ID, token usage and cost from the CLI output into the journal.
 - Role prompts live once in `prompts/`; each adapter renders them into the CLI's native form (Claude Code system prompt and agent files; opencode agent config) in a directory outside the workspace.
@@ -310,7 +313,7 @@ Entries are tried in order. A rate-limited entry is marked cooling until its res
 
 ### 8.1 Host
 
-A dedicated non-admin OS user `ddf` with a private home (mode 700). `ddfd` runs from launchd (macOS) or systemd (Linux) as `ddf`, from a maintainer-promoted DDF ref (§4.4). The operator's own home directory and personal forge login are not accessible.
+A dedicated non-admin OS user `ddf` with a private home (mode 700). `ddfd` runs from launchd (macOS) or systemd (Linux) as `ddf`, from a maintainer-promoted DDF ref (§4.4). launchd supervises `ddfd`, not the container VM: `ddfd` checks VM health and restarts the VM itself (§8.4); a launchd colima job is only a boot-time starter. The operator's own home directory and personal forge login are not accessible.
 
 ### 8.2 GitHub identity
 
@@ -329,12 +332,13 @@ The token broker mints an installation token per operation, narrowed to one repo
 - Daemon clones live in `~ddf/work/<forge>/<owner>/<repo>`, used only by trusted code, with hooks disabled (`core.hooksPath` to an empty directory, no fsmonitor, no filter drivers).
 - Each run gets a fresh copy (its own `.git`, no remotes, no credentials) that exists only inside the container.
 - After the Executor finishes, the adapter's trusted wrapper (not the agent) runs `git add -A && git diff --cached --binary <base>` in the container and writes `/out/change.patch`. The Publisher applies it to the daemon's clean clone with hooks and config neutralised, refuses symlinks, paths outside the repository and any path under `.git/`, and evaluates path policy on the applied tree.
-- **The host never executes repository content.** Verify, the local gate and `forge-local` CI always run in fresh containers. The local gate runs on the applied tree **before** the commit is pushed, so a failing gate produces no forge write.
+- **The host never executes repository content.** Verify, the local gate and `forge-local` CI always run in fresh containers. The local gate runs on the applied tree **before** the commit is pushed, so a failing gate produces no forge write. The host never runs an agent CLI against a repository copy, not even `opencode models` or `opencode debug`: opencode loads project plugins on every invocation.
+- New `.opencode/`, `.claude/` or `node_modules/` paths in a patch are treated as suspicious CLI output (agent configuration is already forbidden by §6.5).
 
 ### 8.4 Containers
 
-- One per run; base image from `images/` or the project's `image`; non-root user; default limits 3 GB RAM, 2 CPU, pids limit; no Docker socket.
-- **No access to host services.** On colima the VM's gateway to the host loopback is dropped by firewall rules inside the VM, re-applied by the daemon on every VM start or recreation; containers reach only the internet. A probe verifies this at daemon start and in §14.1.
+- One per run; base image from `images/` or the project's `image`; non-root user with a fresh, empty home; default limits 3 GB RAM, 2 CPU, pids limit; no Docker socket.
+- **No access to host services.** On colima, firewall rules inside the VM drop container traffic to the VM's gateway to the host loopback and to the VM itself, except DNS; containers reach only the internet. The rules do not survive a VM restart. The daemon applies them (`colima ssh -- sudo …`) after every VM start or recreation; colima provision hooks may add an early layer but are never the guarantee. Before every container start the daemon checks that the rules exist and runs the host-reachability probe; on failure it re-applies the rules once and re-probes; still failing → container runtime unavailable (§9). If the VM is down, `ddfd` restarts it as `ddf` (`colima start`, bounded attempts), then applies and probes the rules. The probe also holds in §14.1.
 - Services (databases, browsers) run inside the container.
 - Network egress to the internet is open in V1 (model APIs, package registries) — accepted risk.
 
@@ -362,8 +366,8 @@ Agent code runs in the project's CI. A project may be set to `merge-integration`
 |---|---|
 | forge error | fail-closed, exponential backoff |
 | free disk below floor (default 15 GB) | no new runs, notify |
-| container runtime unavailable | global pause, notify |
-| host sleep | launchd restarts the daemon; expired leases are released |
+| container runtime unavailable (the daemon's VM restart attempts failed, or the VM firewall is missing or unverifiable after one re-apply; §8.4) | global pause, notify; lifted automatically, with a notification, once health check, firewall check and probe pass again |
+| host sleep | launchd restarts the daemon (never the VM); expired leases are released |
 
 **Run logs:** `~ddf/runs/<task>/<run>/` (brief, result, sanitized CLI output), kept 30 days; secrets redacted by pattern before writing.
 
@@ -474,9 +478,27 @@ Each milestone gets its own implementation plan.
 
 ## 16. Facts to verify in M0
 
-1. Whether an approval submitted by a GitHub App counts toward a ruleset's required approvals. If not: machine users for reviewers, and GitHub's terms on how many machine accounts one person may hold.
-2. Installation token narrowing (repository and permission subset) for all three Apps.
-3. Whether `update-branch` or a pushed base merge is rejected when the base contains workflow-file changes and the App lacks `workflows`.
-4. `claude -p` and `opencode run` inside a Linux container as non-root with a long-lived token: non-interactive behaviour, exact flags to disable workspace settings/hooks/MCP and use only DDF's bundle, rate-limit error shapes, read-only tool restriction for reviewers.
-5. colima under a non-login service user via launchd: start-up, resource limits, VM firewall blocking the host gateway, coexistence with other users' services on the host.
-6. `node:sqlite` stability and warnings on the pinned Node 24 release.
+Answers, evidence and probe definitions: `docs/research/2026-11-m0-facts.md`; decisions in `.ai/decisions.md` ("M0 facts (2026-11)").
+
+1. Whether an approval submitted by a GitHub App counts toward a ruleset's required approvals. If not: machine users for reviewers, and GitHub's terms on how many machine accounts one person may hold. **Answered:** documented-unverified: M4 probe `app-approval-counts` (reviewer App with `pull_requests: write`; also try `contents: read`/`write` variants); fallback machine users (≤ 1 free machine account per person per GitHub terms, per research).
+2. Installation token narrowing (repository and permission subset) for all three Apps. **Answered:** documented, supported as §8.2 assumes (repository IDs + permission subset, ≤ 1 h); M4 probe `token-narrowing`.
+3. Whether `update-branch` or a pushed base merge is rejected when the base contains workflow-file changes and the App lacks `workflows`. **Answered:** unverified, rejected with 403 per a third-party report (pushed merge inferred); outcome in §5.2 Sync with base and §6.6 rule 4; M4 probe `sync-with-workflow-change`.
+4. `claude -p` and `opencode run` inside a Linux container as non-root with a long-lived token: non-interactive behaviour, exact flags to disable workspace settings/hooks/MCP and use only DDF's bundle, rate-limit error shapes, read-only tool restriction for reviewers. **Answered:** verified except rate-limit shapes; outcome in §7.3 and §8.3; M3 probes `claude-config-isolation`, `opencode-config-isolation`, `cli-version-pin`, `claude-rate-limit-shape`, `opencode-rate-limit-shape`.
+5. colima under a non-login service user via launchd: start-up, resource limits, VM firewall blocking the host gateway, coexistence with other users' services on the host. **Answered:** verified (start-up, limits, firewall, rules lost on VM restart, no launchd restart of the VM); outcome in §8.1, §8.4 and §9; open: start after reboot without login (M5 probe `colima-boot`); M3 probes `vm-firewall-reapply`, `runtime-recovery`.
+6. `node:sqlite` stability and warnings on the pinned Node 24 release. **Answered:** `node:sqlite` works without warning on 24.21.0; stability 1.2 (release candidate); pin Node ≥ 24.15.0 (§4.4).
+
+## Changelog
+
+- 2026-11-04 M0: §4.4 — stack pins Node ≥ 24.15.0 (facts: docs/research/2026-11-m0-facts.md#nodesqlite-16-item-6)
+- 2026-11-04 M0: §5.2 Sync with base — forge-refused sync on base workflow-file changes → `needs-owner` without consuming a sync batch; human branch update → full re-review (facts: docs/research/2026-11-m0-facts.md#sync-when-the-base-changed-workflow-files-16-item-3)
+- 2026-11-04 M0: §6.6 rule 4 — a base merge not created by the daemon never qualifies for the ancestor exception (facts: docs/research/2026-11-m0-facts.md#sync-when-the-base-changed-workflow-files-16-item-3)
+- 2026-11-04 M0: §7.3 — opencode pinned to npm `opencode-ai` 1.x, 2.x unsupported; version check (facts: docs/research/2026-11-m0-facts.md#versions)
+- 2026-11-04 M0: §7.3 — isolation switches named; `--tools` not isolation; `--bare` unusable; brief on stdin (facts: docs/research/2026-11-m0-facts.md#claude-code-making-ddfs-bundle-the-only-configuration-source, #opencode-making-ddfs-bundle-the-only-configuration-source)
+- 2026-11-04 M0: §7.3 — explicit model flag and wall-clock timeout on every CLI call (facts: docs/research/2026-11-m0-facts.md#opencode-auth-and-rate-limit-error-shapes, #opencode-executor-and-json-output)
+- 2026-11-04 M0: §7.3 — error classification from `is_error`/`api_error_status`/`error`, not `subtype`; auth → credential failure, rate limit → next entry (facts: docs/research/2026-11-m0-facts.md#claude-code-auth-and-rate-limit-error-shapes, #opencode-auth-and-rate-limit-error-shapes)
+- 2026-11-04 M0: §8.1 — launchd supervises `ddfd`, not the VM; `ddfd` restarts the VM (facts: docs/research/2026-11-m0-facts.md#restart-supervision-by-launchd)
+- 2026-11-04 M0: §8.3 — host never runs an agent CLI against a repository copy; `.opencode/`, `.claude/`, `node_modules/` additions suspicious (facts: docs/research/2026-11-m0-facts.md#opencode-making-ddfs-bundle-the-only-configuration-source, #state-written-to-the-home-directory)
+- 2026-11-04 M0: §8.4 — fresh empty container home (facts: docs/research/2026-11-m0-facts.md#state-written-to-the-home-directory)
+- 2026-11-04 M0: §8.4 — daemon applies VM firewall after every VM start, verifies and probes before every container start, re-applies once; firewall also blocks the VM except DNS; daemon restarts the VM (facts: docs/research/2026-11-m0-facts.md#rule-persistence-across-vm-restarts, #vm-firewall-rules, #what-84-and-9-should-say-forced-changes)
+- 2026-11-04 M0: §9 — runtime unavailable only after the daemon's restart/re-apply fails; missing firewall counts; pause lifts automatically with a notification; launchd never restarts the VM (facts: docs/research/2026-11-m0-facts.md#what-84-and-9-should-say-forced-changes)
+- 2026-11-04 M0: §16 — items 1–6 marked answered with pointers (facts: docs/research/2026-11-m0-facts.md)
