@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ddf.routing/v1",
+  "title": "DDF operator routing (<operator-config>/routing.yaml)",
+  "description": "Maps tiers and roles to agent adapters and models (spec section 7.2). Model names appear only in this operator layer. The frontier tier is never selected by DDF and is therefore not routable.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tiers"],
+  "properties": {
+    "tiers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deep", "standard"],
+      "properties": {
+        "deep": { "$ref": "#/$defs/entries" },
+        "standard": { "$ref": "#/$defs/entries" },
+        "routine": { "$ref": "#/$defs/entries" },
+        "fast": { "$ref": "#/$defs/entries" }
+      }
+    },
+    "roles": {
+      "description": "Optional per-role preferences, tried before the role's tier entries.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "planner": { "$ref": "#/$defs/rolePreference" },
+        "executor": { "$ref": "#/$defs/rolePreference" },
+        "r1": { "$ref": "#/$defs/rolePreference" },
+        "r2": { "$ref": "#/$defs/rolePreference" }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxConcurrentContainers": {
+          "description": "Every container counts: Executor, each reviewer, local gate, forge-local CI.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxSubagentsPerRun": {
+          "description": "Advisory, passed to the agent; not enforceable by the CLIs.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 3
+        }
+      }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter", "model"],
+      "properties": {
+        "adapter": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "model": { "type": "string", "minLength": 1 },
+        "effort": { "enum": ["low", "medium", "high"] }
+      }
+    },
+    "entries": {
+      "description": "Tried in order; a rate-limited entry cools until its reset time.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/entry" }
+    },
+    "rolePreference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prefer"],
+      "properties": {
+        "prefer": { "$ref": "#/$defs/entries" }
+      }
+    }
+  }
+}

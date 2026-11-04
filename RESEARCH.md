@@ -1,5 +1,7 @@
 # Research
 
+Status: historical — superseded by docs/specs/2026-11-03-ddf-v1-design.md
+
 Primary tracker: [Issue #1 — Define v0 architecture and migration boundary](https://github.com/syllik/deep-dark-factory/issues/1).
 
 ## Purpose
@@ -13,7 +15,7 @@ The research must distinguish reusable product concepts from legacy implementati
 Audit at minimum:
 
 - `syllik/ai-workflow`;
-- `syllik/codex-local-runner`;
+- a private runner-archive repository;
 - Fabro as an architecture reference only;
 - 3–5 other relevant open-source workflow/agent systems;
 - native Git and GitHub primitives;

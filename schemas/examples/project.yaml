@@ -1,0 +1,28 @@
+# Example .ddf/project.yaml (schema ddf.project/v1, spec section 6.7)
+version: ddf.project/v1
+integrationBranch: master
+autonomy: merge-integration          # requested; effective = min(operator max, this)
+verify:                              # run inside containers only
+  - npm ci
+  - npm run verify
+checks:
+  required: [verify]                 # forge check names the gate requires
+image: .ddf/Dockerfile               # optional; default base image otherwise
+risk:
+  lowMaxLines: 200
+  docs: ["docs/**", "**/*.md"]
+  sensitive: ["src/payments/**", "src/auth/**", "migrations/**"]
+ciEntrypoints: ["package.json", "scripts/ci/**"]   # force `sensitive`
+forbidden: ["ops/**"]
+hardStops: [secrets, deploy, real-money, data-destructive]
+zones:
+  migrations: ["migrations/**"]
+  deps: ["package.json", "package-lock.json"]
+planning:
+  maxAutoChildren: 3
+change:
+  branch: "{type}/issue-{n}-{slug}"
+  merge: squash
+  template: .ddf/change-template.md  # optional PR/MR body template
+reviewers:
+  r2DifferentProvider: false         # require R2 on a different provider than the Executor

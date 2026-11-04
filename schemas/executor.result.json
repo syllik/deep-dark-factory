@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ddf.executor.result/v1",
+  "title": "DDF Executor result",
+  "description": "Written by the Executor to /out/result.json; /out/change.patch is exported separately by the trusted wrapper. See prompts/executor.md and spec sections 5.2 and 8.3.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "verdict", "summary", "verify"],
+  "properties": {
+    "schema": { "const": "ddf.executor.result/v1" },
+    "verdict": { "enum": ["COMPLETE", "BLOCKED"] },
+    "summary": { "type": "string", "minLength": 1 },
+    "verify": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commands", "passed"],
+      "properties": {
+        "commands": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "passed": { "type": "boolean" }
+      }
+    },
+    "decisionsWritten": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "blockedReason": { "type": "string", "minLength": 1 },
+    "wontFix": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["findingId", "reason"],
+        "properties": {
+          "findingId": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "verdict": { "const": "COMPLETE" } } },
+      "then": {
+        "properties": {
+          "verify": {
+            "properties": {
+              "commands": { "minItems": 1 },
+              "passed": { "const": true }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "BLOCKED" } } },
+      "then": { "required": ["blockedReason"] }
+    }
+  ]
+}

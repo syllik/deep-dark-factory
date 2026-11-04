@@ -1,0 +1,27 @@
+# DDF project profile (schema ddf.project/v1).
+# Always read from the integration branch. Every key: docs/project/project-yaml-reference.md in the DDF repository.
+# Replace the example values below with this project's own.
+version: ddf.project/v1
+integrationBranch: main              # the dev/staging branch DDF targets; DDF never merges elsewhere
+autonomy: propose                    # requested; effective = min(operator max, this). Raise only after the CI prerequisites hold
+verify:                              # run inside containers only
+  - npm ci
+  - npm test
+checks:
+  required: [test]                   # exact forge check names the merge gate requires
+risk:
+  lowMaxLines: 200
+  docs: ["docs/**", "**/*.md"]
+  sensitive: []                      # money, keys, auth, data, migrations paths
+ciEntrypoints: ["package.json"]      # scripts and manifests CI relies on; force the sensitive class
+forbidden: []                        # added on top of the product defaults
+hardStops: [secrets, deploy, real-money, data-destructive]
+zones: {}
+planning:
+  maxAutoChildren: 3
+change:
+  branch: "{type}/issue-{n}-{slug}"
+  merge: squash
+  template: .ddf/change-template.md
+reviewers:
+  r2DifferentProvider: false

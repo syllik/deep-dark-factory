@@ -1,0 +1,36 @@
+name: Task
+description: A concrete, scoped piece of work. A maintainer may hand it to DDF later.
+title: "task: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Filing this form does not start DDF. An allow-listed maintainer marks the task for DDF separately.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What should change, and why.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: One checkable condition per line.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and constraints
+      description: Files or areas involved, things that must not change, dependencies on other tasks.
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Links, prior decisions, examples.
+    validations:
+      required: false
