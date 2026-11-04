@@ -76,8 +76,8 @@ M0 verified colima under a non-login service user via launchd ([spec §16](../sp
 1. **Service user:** a hidden, non-admin user `ddf` with its home created explicitly and set to mode 700. Run setup with `umask 022`, and run every `sudo -u ddf -H …` step from `cd ~ddf`.
 2. **Boot-time starter:** a system LaunchDaemon with `UserName=ddf` that runs `colima start --foreground` with the VM size, `vz` and `virtiofs`, `RunAtLoad=true` and **no `KeepAlive`** (launchd does not restart the VM, and the job must not race `ddfd`'s own restart).
 3. **Docker access:** `ddfd` uses the `ddf` user's colima Docker socket through an absolute `DOCKER_HOST`.
-4. **VM firewall:** applied by `ddfd` through `colima ssh` after every VM start it observes and before admitting runs, then the reachability probe; colima provision hooks are optional and never the guarantee.
-5. **Recovery:** before each run `ddfd` checks colima and Docker status, rule presence and the probe; it restarts the VM with `colima start` as `ddf`; global pause only after that fails.
+4. **VM firewall:** applied by `ddfd` through `colima ssh` after every VM start it observes and before every container start, then the reachability probe; colima provision hooks are optional and never the guarantee.
+5. **Recovery:** before every container start `ddfd` checks colima and Docker status, rule presence and the probe; it restarts the VM with `colima start` as `ddf`; global pause only after that fails.
 
 Still unverified, closed by M3/M5 probes: start after a host reboot without login (`colima-boot`), launchd respawn when the colima process exits, provision hooks elevating with `sudo -n`, IPv6, and coexistence with a second colima instance (`coexistence`). Until M5 ships `ddf setup`, treat the research recipe as the reference, not as an installer.
 

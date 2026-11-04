@@ -37,7 +37,7 @@ Failures are classified from the `error` event's `statusCode` / `isRetryable`:
 | `APIError` with `statusCode` 401/403 | credential failure: global pause, reason `credential`; never retried |
 | `statusCode` 429 | rate limit: the entry cools until its reset time; the next entry of the tier is used; with no entry left the task waits and one notification is sent ([routing.md](../concepts/routing.md#selection-and-fallback)) |
 | other `isRetryable: true` (5xx) | backoff on the same entry, not fallback |
-| `UnknownError` | failed run, with the stderr log attached |
+| `UnknownError` | failed run, with the stderr log attached (only when the routed credential was present; a missing or empty credential is caught before the CLI starts and is a credential failure) |
 
 The rate-limit shape is unverified (M3 probe `opencode-rate-limit-shape`).
 

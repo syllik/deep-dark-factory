@@ -57,7 +57,7 @@ Not `needs-owner`, but reported:
 
 | Situation | Action |
 |---|---|
-| Global pause (a set of reasons: `owner`, `credential`, `revert-red`, `runtime`, `security`; [lifecycle.md#global-pause](../concepts/lifecycle.md#global-pause)) | report every reason; `runtime` lifts automatically once the runtime is healthy again; for the others the owner fixes the cause; `ddf resume` only with the owner's approval |
+| Global pause (a set of reasons: `owner`, `credential`, `revert-red`, `runtime`, `security`; [lifecycle.md#global-pause](../concepts/lifecycle.md#global-pause)) | report every reason; `runtime` lifts automatically once the runtime is healthy again; for `owner`, resume when the owner says so; for `credential`, `revert-red` and `security` the owner fixes the cause first; `ddf resume` only with the owner's approval |
 | Rate limit, no routing entry left | tasks wait; nothing to do until the reset time |
 | Free disk below floor | report; owner frees space |
 | Change set to draft or closed by a human (`hold`) | report; the owner reopens or closes the task |
