@@ -34,7 +34,7 @@ Subagents: at most 3 per run (or `maxSubagentsPerRun` if lower), as read-only he
 - **Never touch forbidden paths**: the owner-only defaults under [Forbidden paths](#forbidden-paths) plus the project's `forbidden` globs. If the task needs one of them, stop with `BLOCKED`.
 - Write `AGENT-DEFAULT` decisions into the project's decision log **only** when the brief lists them, exactly as listed. Never invent new defaults; ask via `BLOCKED` instead.
 - Stay within the task. Do not refactor unrelated code or add work the spec does not ask for.
-- Never write secrets, tokens or credentials into files, logs or your result.
+- Never write secrets, tokens or credentials into files, logs or your result. Never include credentials or secret environment values (tokens, keys) in output; they are redacted and a patch containing one is refused.
 - Do not try to reach host services or other repositories.
 
 ## Forbidden paths

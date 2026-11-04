@@ -11,7 +11,7 @@ The core has no network, forge or provider access. Modules:
 - `model`: versioned types and schemas (Task, Run, Change, Review, Finding, Question, Decision; IDs `ddf.<name>/v1`).
 - `store`: SQLite as the canonical state, append-only event journal, run leases, intents.
 - `lifecycle`: pure transition functions of the task state machine.
-- `scheduler`: run slots, zones, dependencies, priority order, global pause.
+- `scheduler`: run slots, zones, dependencies, priority order, global pause (a set of reasons).
 - `policy`: risk classification, reviewer set, blocking rules, path policy, hard stops, `evaluateMerge`. Pure functions.
 - `workspace`: daemon-owned clean clones, per-run copies, patch export/apply. Never executes repository content on the host.
 - `context`: bounded per-role briefs built from the integration branch.
@@ -33,7 +33,7 @@ Entry points: `ddfd` (single-instance daemon, one tick per minute, `--dry-run`) 
 - Core never imports adapters; adapters never import each other; the daemon wires them.
 - Trusted code is the daemon and adapters on the host. Agents run only inside containers, receive a brief and a workspace copy, and never hold forge credentials or the review-signing key.
 - The daemon runs only from a maintainer-promoted ref, never from the integration branch.
-- One npm package in V1; TypeScript on Node 24, built-ins first, every dependency with a recorded reason.
+- One npm package in V1; TypeScript on Node 24 (pinned to 24.21.0; `node:sqlite` needs ≥ 24.15.0), built-ins first, every dependency with a recorded reason.
 
 ## Invariants
 
