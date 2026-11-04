@@ -14,7 +14,7 @@ Handoffs **replace dated local handoff files**. State lives in the forge (Issues
 - No local files: no `handoff-<date>.md`, no notes in the worktree, no state in the session transcript only.
 - Post a handoff whenever the session stops: at the end of work, at `needs-owner`, at "ready for human merge", or before the context grows too long.
 - Facts only, each with a link: Issue/PR numbers, full head SHAs, states from [lifecycle.md#states](../concepts/lifecycle.md#states). No transcript retelling, no reasoning history.
-- Public repositories: no hostnames, absolute local paths, IPs, tokens or private repository names. Worktrees are named by branch only.
+- Public repositories: no hostnames, absolute local paths, IPs, tokens or private repository names. Worktrees are named by branch only. Local temp directories (for example a reviewer-input directory) are never named; for work in flight the comment names the PR, the head SHA and the state only.
 
 ## Sections
 

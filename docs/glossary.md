@@ -28,15 +28,15 @@ See [spec §4.5](specs/2026-11-03-ddf-v1-design.md#45-store-and-intents), [spec 
 
 **lease**
 A run lease held in the store, scoped by task key like every store row. When the daemon is restarted after host sleep, expired leases are released.
-See [spec §4.1](specs/2026-11-03-ddf-v1-design.md#41-core-no-network-no-forge-no-provider), [spec §4.5](specs/2026-11-03-ddf-v1-design.md#45-store-and-intents), [spec §9](specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery).
+See [lifecycle.md#store-intents-and-leases](concepts/lifecycle.md#store-intents-and-leases), [spec §4.1](specs/2026-11-03-ddf-v1-design.md#41-core-no-network-no-forge-no-provider), [spec §4.5](specs/2026-11-03-ddf-v1-design.md#45-store-and-intents), [spec §9](specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery).
 
 **manual mode**
 The procedure an interactive LLM session follows to run one DDF task without the daemon, keeping the same lifecycle, roles, bounds and policy; a human merges. DDF itself is built this way until M5.
 See [manual-mode.md](orchestrator/manual-mode.md), [spec §11](specs/2026-11-03-ddf-v1-design.md#11-documentation-set-the-orchestrator-canon).
 
 **pause reason**
-The reason stated with a global pause, sent as an immediate Telegram notification. Triggers named in the sources include a second DDF-attributed red within 24 h, credential failures and an unavailable container runtime.
-See [spec §9](specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery), [lifecycle.md#revert](concepts/lifecycle.md#revert).
+One member of the global pause's set of reasons: `owner`, `credential`, `revert-red`, `runtime` or `security`. The daemon is paused while the set is non-empty; only `runtime` lifts automatically, every other reason only by `ddf resume` or `/resume`.
+See [lifecycle.md#global-pause](concepts/lifecycle.md#global-pause), [spec §9](specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery), [lifecycle.md#revert](concepts/lifecycle.md#revert).
 
 **projection**
 Forge labels and comments that mirror DDF state for humans; the store is canonical. The merge gate reads reviews from the store, not from forge comments.
@@ -47,8 +47,8 @@ The reviewers a change needs, taken from its risk class: R1 for `docs`, `low` an
 See [policy.md#risk-classes](concepts/policy.md#risk-classes), [spec §6.2](specs/2026-11-03-ddf-v1-design.md#62-risk-classes-and-reviewers).
 
 **revision**
-One published update of a change: the Publisher makes one commit and one push per revision, with no force-push, rebase or amend. CI-fix attempts are bounded per revision (default 2).
-See [roles.md#publisher](concepts/roles.md#publisher), [lifecycle.md#bounds](concepts/lifecycle.md#bounds).
+One head of the change produced by the Publisher: one commit and one push, with no force-push, rebase or amend. Each published correction batch creates a new revision; CI-fix attempts are bounded per revision (default 2).
+See [lifecycle.md#revision](concepts/lifecycle.md#revision), [roles.md#publisher](concepts/roles.md#publisher), [lifecycle.md#bounds](concepts/lifecycle.md#bounds).
 
 **risk class**
 The class (`docs`, `low`, `standard`, `sensitive`, `revert`) computed deterministically from the diff and the project profile; it decides the reviewer set. The Planner or R1 may raise it; nothing lowers it.

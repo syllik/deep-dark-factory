@@ -81,6 +81,8 @@ The [Publisher](roles.md#publisher) (trusted code):
 4. makes one commit and one push per revision (no force-push, rebase or amend);
 5. opens or updates the change.
 
+<a id="revision"></a>A **revision** is one head of the change produced by the Publisher: one commit and one push. Each correction batch, once published, creates a new revision.
+
 The Publisher writes the change body and squash message from a template; agent text appears only in a sanitized section (closing keywords, `[skip ci]`-style directives and mentions stripped); `Closes <task>` is added by DDF only for the task itself. Local gate failure → back to the Executor as a correction batch.
 
 - **Redaction before publication.** Before every forge write and every notification send, all agent-originated text (review projection comments, change body, commit message, patch content, Telegram messages) is redacted by secret patterns and by the exact values of the secrets loaded into that run's container. A patch containing a loaded secret value is refused: hard stop `secrets` ([policy.md](policy.md#hard-stops)), failed run.
@@ -163,6 +165,15 @@ Gate refusals map to transitions ([spec §5.2](../specs/2026-11-03-ddf-v1-design
 | `security` | VM firewall rules missing while no VM restart was observed | `ddf resume` / `/resume` |
 
 Rationale: [spec §9](../specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery), [spec §8.4](../specs/2026-11-03-ddf-v1-design.md#84-containers).
+
+## Store, intents and leases
+
+- **Store:** the canonical state (SQLite), with an append-only event journal; tables (indicative) `tasks`, `runs`, `changes`, `reviews`, `findings`, `questions`, `intents`, `leases`, `events`. Every store row, lease and signature is scoped by the task key, a digest of `{forge, repository, source kind, source id}`.
+- **Intent:** every forge write (create task, push, open/update change, post review, update branch, merge, revert, close/reopen task) writes an intent before the call and its outcome after. Every forge object DDF creates carries a hidden task-key marker (`ddf:task-key=<key>`). Model runs are not intents.
+- **Lease:** a run lease held in the store, scoped by task key. After host sleep launchd restarts the daemon (never the VM) and expired leases are released.
+- **Recovery:** on start the daemon takes the instance lock, kills containers from a previous instance, discards their runs (retried within the run budget), and reconciles every unresolved intent by task-key marker (for example, a change for the task already exists → adopt it). Unreconcilable intents → `needs-owner`; never a blind retry of a forge write.
+
+Rationale: [spec §4.5](../specs/2026-11-03-ddf-v1-design.md#45-store-and-intents), [spec §9](../specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery), [spec §4.1](../specs/2026-11-03-ddf-v1-design.md#41-core-no-network-no-forge-no-provider).
 
 ## Bounds
 
