@@ -81,7 +81,7 @@ The [Publisher](roles.md#publisher) (trusted code):
 4. makes one commit and one push per revision (no force-push, rebase or amend);
 5. opens or updates the change.
 
-<a id="revision"></a>A **revision** is one head of the change produced by the Publisher: one commit and one push. Each correction batch, once published, creates a new revision.
+<a id="revision"></a>A **revision** is the initial execution or one correction batch, as published by the Publisher (one commit and one push, with CI-fix pushes made within it counted inside it, so "CI-fix attempts per revision" in [Bounds](#bounds) is bounded per revision, not per head).
 
 The Publisher writes the change body and squash message from a template; agent text appears only in a sanitized section (closing keywords, `[skip ci]`-style directives and mentions stripped); `Closes <task>` is added by DDF only for the task itself. Local gate failure → back to the Executor as a correction batch.
 

@@ -47,7 +47,7 @@ The reviewers a change needs, taken from its risk class: R1 for `docs`, `low` an
 See [policy.md#risk-classes](concepts/policy.md#risk-classes), [spec §6.2](specs/2026-11-03-ddf-v1-design.md#62-risk-classes-and-reviewers).
 
 **revision**
-One head of the change produced by the Publisher: one commit and one push, with no force-push, rebase or amend. Each published correction batch creates a new revision; CI-fix attempts are bounded per revision (default 2).
+The initial execution or one correction batch as published by the Publisher (one commit and one push, no force-push, rebase or amend); CI-fix pushes made within it are counted inside it, so the CI-fix bound (default 2) applies per revision.
 See [lifecycle.md#revision](concepts/lifecycle.md#revision), [roles.md#publisher](concepts/roles.md#publisher), [lifecycle.md#bounds](concepts/lifecycle.md#bounds).
 
 **risk class**
