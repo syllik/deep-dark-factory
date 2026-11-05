@@ -1,6 +1,6 @@
 ## DDF handoff
 
-<!-- One comment on the tracking Issue. Facts with links only. Write "none" in an empty section; keep every section. Rules: docs/orchestrator/handoff.md -->
+<!-- One comment on the tracking Issue. Facts with links only. Write "none" in an empty section; keep every section. Never name local paths or temp directories: PR, head SHA and state only. Rules: docs/orchestrator/handoff.md -->
 
 Mode: <manual | supervisor>
 
