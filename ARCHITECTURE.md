@@ -33,7 +33,8 @@ Entry points: `ddfd` (single-instance daemon, one tick per minute, `--dry-run`) 
 - Core never imports adapters; adapters never import each other; the daemon wires them.
 - Trusted code is the daemon and adapters on the host. Agents run only inside containers, receive a brief and a workspace copy, and never hold forge credentials or the review-signing key.
 - The daemon runs only from a maintainer-promoted ref, never from the integration branch.
-- One npm package in V1; TypeScript on Node 24 (pinned to 24.21.0; `node:sqlite` needs ≥ 24.15.0), built-ins first, every dependency with a recorded reason.
+- One Go module in V1, built into static binaries for linux and darwin on arm64 and amd64; standard library first, every dependency with a recorded reason ([research](docs/research/2026-11-runtime-and-language.md)).
+- Hybrid runtime: one long-lived control plane per host holds the store and the secrets; each task's execution side (run containers, workspace copies) is disposable.
 
 ## Invariants
 

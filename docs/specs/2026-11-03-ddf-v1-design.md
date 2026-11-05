@@ -63,7 +63,7 @@ Rules:
 | Module | Responsibility |
 |---|---|
 | `model` | Types and versioned schemas: Task, Run, Change, Review, Finding, Question, Decision. Schema IDs `ddf.<name>/v1`. |
-| `store` | SQLite (Node `node:sqlite`, no dependency) as the canonical state; append-only event journal; run leases; intents. |
+| `store` | SQLite (embedded, through a cgo-free driver; §4.4) as the canonical state; append-only event journal; run leases; intents. |
 | `lifecycle` | Pure transition functions for the task state machine (§5). |
 | `scheduler` | Run slots, zones, dependencies, priority order, global pause (a set of reasons, §9). |
 | `policy` | Risk classification, reviewer set, blocking rules, path policy, hard-stop detection, `evaluateMerge` (§6). Pure functions. |
@@ -90,8 +90,9 @@ Rules:
 - Core never imports adapters; adapters never import each other; the daemon wires them. A CI test fails on a forbidden import.
 - Trusted code = daemon + adapters on the host. Agents run only inside containers, receive a brief and a workspace copy, and return files in `/out`. They never hold forge credentials or the review-signing key.
 - **The daemon runs only from a maintainer-promoted ref** of this repository: a release tag (a maintainer-made tag on a `master` commit that passed CI), never the moving tip of the integration branch. Autonomous merges into DDF's integration branch therefore take effect only after a human tags a release.
-- V1 ships as one npm package (`src/core`, `src/adapters`, `src/cli`). Split into packages only when a second consumer exists.
-- Stack: TypeScript on Node 24, pinned to 24.21.0 (`node:sqlite` needs ≥ 24.15.0, documented release candidate; verified without warning on 24.21.0), Node built-ins first (`node:sqlite`, `node:test`, `fetch`); every dependency needs a recorded reason.
+- V1 ships as one Go module (`src/core`, `src/adapters`, `src/cli`; layout per the M2 plan) built into static binaries (`ddfd`, `ddf`) for linux and darwin on arm64 and amd64. Split only when a second consumer exists.
+- Stack: Go, toolchain pinned in `go.mod`, `CGO_ENABLED=0`; standard library first; an exhaustiveness analyzer for enum-like types runs as a required CI step; every dependency needs a recorded reason. Rationale and measurements: `docs/research/2026-11-runtime-and-language.md`; decision: `.ai/decisions.md` ADR 2 (2026-11-06).
+- Runtime model: hybrid. One long-lived control plane per host (`ddfd`, the store, the secrets) and a disposable per-task execution side (run containers, workspace copies) that is torn down when the task leaves the conveyor. Decision: `.ai/decisions.md` ADR 1 (2026-11-06); teardown rules in Issue #33.
 
 ### 4.5 Store and intents
 
@@ -542,3 +543,5 @@ Answers, evidence and probe definitions: `docs/research/2026-11-m0-facts.md`; de
 - 2026-11-05 Issue #22: §6.2, §12 — wording: on `sensitive` only R2 runs at `deep`; R1 stays at `standard` as in §7.1; no behaviour change (see docs/concepts/roles.md)
 - 2026-11-05 Issue #22: §7.1 — Planner tier predicted from the paths the task names; a `sensitive` proposal from a pass below `deep` re-runs the Planner once at `deep`, counted in `maxRunsPerTask` (see docs/concepts/roles.md#planner)
 - 2026-11-05 Issue #22: §6.7 — `change.branch` placeholders `{type}`, `{n}`, `{slug}` defined (see docs/project/project-yaml-reference.md#change)
+- 2026-11-06 Issue #31: §4.1, §4.4 — stack changed from TypeScript on Node 24 to Go (static binaries, cgo-free SQLite driver); §16 item 6 stays as a historical answer (see docs/research/2026-11-runtime-and-language.md, .ai/decisions.md ADR 2)
+- 2026-11-06 Issue #31: §4.4 — runtime model recorded as hybrid: long-lived control plane, disposable per-task execution side; follow-ups #33, #34, #35 (see docs/research/2026-11-runtime-and-language.md, .ai/decisions.md ADR 1)

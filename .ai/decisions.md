@@ -53,7 +53,7 @@ Source: `docs/research/2026-11-m0-facts.md`. Format: fact → consequence → sp
 - §16.3 App without `workflows` gets 403 on `update-branch` (pushed merge likely too) when base changed workflow files → keep withholding `workflows`; refused sync → `needs-owner`, no sync batch used; human branch update → full re-review → §5.2, §6.6 rule 4, §16 → unverified → M4 `sync-with-workflow-change`.
 - §16.4 Both CLIs run non-interactively as non-root; isolation = Claude `--setting-sources ''` + `--strict-mcp-config`, opencode `OPENCODE_*` + `--pure`; opencode npm 1.x and GitHub 2.x incompatible → pin npm 1.x, explicit model, per-call timeout, classify errors from `is_error`/`api_error_status`/`error`; host never runs agent CLIs on a repo copy → §7.3, §8.3, §8.4, §16 → Claude Code verified; opencode verified with free models only (no provider credential available); rate-limit shapes unverified; open: `opencode-executor-output`, `opencode-reviewer-readonly` → M3 `cli-version-pin`, `agent-home-state`, `claude-config-isolation`, `opencode-config-isolation`, `*-error-shape`, `*-rate-limit-shape`, `secret-exfil-redaction`.
 - §16.5 colima as `ddf` via LaunchDaemon works, limits enforced; VM rules lost on restart, provision hooks fail silently, launchd does not restart the VM → daemon applies/verifies rules before every container start and restarts the VM; global pause only after that fails → §8.1, §8.4, §9, §16 → verified; unverified: coexistence with a second colima instance (owner's own), launchd respawn when the colima process exits, provision hooks with `sudo -n`, IPv6, host reboot (owner rerun pending) → M3 `vm-firewall-reapply`, `runtime-recovery`, `coexistence`; M5 `colima-boot`, `coexistence`.
-- §16.6 `node:sqlite` no warning on Node 24.21.0, stability 1.2 since 24.15.0 → Node ≥ 24.15.0 (documented release candidate), pinned and verified on 24.21.0; store access only via `store` → §4.4, §16 → verified (stability: documented) → none (M2 store tests).
+- §16.6 `node:sqlite` no warning on Node 24.21.0, stability 1.2 since 24.15.0 → Node ≥ 24.15.0 (documented release candidate), pinned and verified on 24.21.0; store access only via `store` → §4.4, §16 → verified (stability: documented) → none (M2 store tests). (superseded 2026-11-06)
 
 ## 2026-11-05 Branch model (owner decision)
 
@@ -68,3 +68,59 @@ Source: Issue #20 (owner decision of 2026-11-05, see #12). Supersedes the branch
 - 2026-11-05 AGENT-DEFAULT: Where and how is the new branch-model decision recorded in `.ai/decisions.md`? → A new section "2026-11-05 Branch model (owner decision)" at the end of the file; the old branch-roles line gets the suffix "(superseded 2026-11-05)". Task: #20.
 - 2026-11-05 AGENT-DEFAULT: Does a class raised to `sensitive` after planning (computed at publishing or raised by R1) re-run the Planner at `deep`? → No. Only a READY result proposing `sensitive` from a pass below `deep` triggers the one re-run at `deep`; a later raise changes the reviewer set only. Task: #22.
 - 2026-11-05 AGENT-DEFAULT: Does asking in chat instead of a full needs-owner round for a needed forbidden-path change apply only when the need is known at planning time? → It applies whenever the need is found, at any step, as long as the owner is present: they have written in this session's chat during this task and the session is still running. Task: #22.
+
+## 2026-11-06 Runtime model and language (Issue #31)
+
+Source: Issue #31, research [`docs/research/2026-11-runtime-and-language.md`](../docs/research/2026-11-runtime-and-language.md). Owner's choices in the task session's chat on 2026-11-06: hybrid, Go. Accepted by the owner's merge. These ADRs supersede the §16.6 `node:sqlite` line above and the stack of spec §4.4 as approved on 2026-11-03.
+
+- 2026-11-06 AGENT-DEFAULT: What are the name and location of the research document? → `docs/research/2026-11-runtime-and-language.md`, next to `docs/research/2026-11-m0-facts.md`. Task: #31.
+- 2026-11-06 AGENT-DEFAULT: Where do the two ADRs go in `.ai/decisions.md`? → A new section "2026-11-06 Runtime model and language (Issue #31)" at the end of the file; entries the ADRs replace get the suffix "(superseded 2026-11-06)". Task: #31.
+
+### ADR 1: runtime model
+
+- **Decision:** Hybrid. One long-lived control plane per host (`ddfd`) holds the store, the secrets, the scheduler and the tick, as in spec §4, §8.1 and §9. Each task's execution side is a disposable **task cell**: run containers, workspace copies, scratch volumes and any per-task network, all labelled with the task key. When the task leaves the conveyor, a verified teardown destroys the cell (#33). Run slots and container limits adapt to the host (#34). The control plane can also run as one container on a Linux host (#35).
+- **Alternatives:** (A) an ephemeral factory container per task, with state on the forge or in an external store, started by a timer or hosted CI; (B) the spec's long-lived daemon with no per-task teardown or adaptive limits.
+- **Pros:**
+  - The long waits (CI up to 2 h, owner answers, human merge) and the cross-task state stay in one store, with no new service. That state is zones, slots, the global pause, the 24 h `revert-red` window, the run budget, finding identity and intents.
+  - The forge keys and the review-signing key stay in one trusted process, and run containers never get the runtime socket.
+  - `forge-local` and plain Git (D8), the macOS V1 host (D2), D10 and "no required runner" all hold.
+  - The per-task execution side becomes a black box that is destroyed on purpose.
+- **Cons:**
+  - The control plane remains a long-lived process the operator runs and backs up.
+  - The factory as a whole does not self-destroy per task, only its execution side.
+  - The teardown rules and adaptive limits are new spec work.
+- **Rejected (A) because:**
+  - It needs either a long-lived container per task or external transactional state with fencing (the v0 finding).
+  - It needs a long-lived trigger anyway.
+  - It copies the keys into every factory container that can start containers. Nesting needs the root-equivalent socket, privileged DinD or a Linux-only runtime (Sysbox).
+  - It loses the audit record and the intents unless they are exported first.
+- **Consequences:**
+  - Spec §4.4 records the model.
+  - #33 specifies the task cell and its §14.1 probe.
+  - #34 replaces the fixed 3 GB / 2 CPU defaults with host-derived sizing.
+  - #35 specifies the container deployment of the control plane for M5.
+  - What survives a task: forge objects, store rows and the journal, sanitized run logs (30 days). What does not: workspace contents, container filesystems, agent homes, loaded credentials.
+
+### ADR 2: implementation language
+
+- **Decision:** Go for `ddfd`, `ddf` and the core. Toolchain pinned in `go.mod`, `CGO_ENABLED=0`, static binaries for linux and darwin on arm64 and amd64, standard library first. An exhaustiveness analyzer (`nishanths/exhaustive` or equivalent) runs as a required CI step. Every dependency has a recorded reason. `scripts/docs-check.mjs` stays a Node docs tool.
+- **Alternatives:** TypeScript on Node 24 (the stack inherited from the v0 decision without a language comparison); Rust.
+- **Pros (measured on a macOS arm64 workstation, see the research file):**
+  - Idle RSS after the tick workload is 8 MiB, against 69 MiB for Node.
+  - The tick runs in 19–31 ms, against 81–110 ms for Node.
+  - The output is one static binary of 7.1 MiB (3.0 MiB gzip) with SQLite inside. It cross-builds for linux arm64 and amd64 from any machine without a C toolchain.
+  - The image can be about 1 MiB of base (distroless static) plus the binary, against `node:24.21.0-alpine` at 59 MiB and a 117 MiB `node` runtime per host.
+  - Builds are fast (8 s cold, 0.8 s after an edit).
+  - The ecosystem is mature for subprocess, container and GitHub work (`go-github`).
+- **Cons:**
+  - Go has no sum types: the lifecycle, policy and gate rely on enum-like constants, sealed interfaces, the exhaustiveness analyzer and tests.
+  - SQLite, JSON Schema 2020-12 and YAML become dependencies (cgo-free SQLite driver, `santhosh-tekuri/jsonschema`, `yaml/go-yaml`); Node had SQLite built in.
+  - The M2 plan's stack sections must be rewritten.
+- **Rejected:**
+  - TypeScript: a runtime install per host, about 8× Go's idle memory, npm supply-chain exposure, and `node:sqlite` still a release candidate. Its one advantage is zero switching cost.
+  - Rust: the strongest correctness (compiler-checked exhaustive `match`), but the Linux cross-build with bundled SQLite failed without a C cross-toolchain, the cold build took 20 s for a tiny crate, `serde_yaml` is archived, and agents need more compile-fix rounds (judged).
+- **Consequences:**
+  - Spec §4.1 `store` and the §4.4 package and stack bullets change in this PR, with Changelog lines.
+  - #32 rewrites the M2 plan: Tech Stack, Reuse, CI, Tasks 0–2, the OD items, and the profile's manifest files (`go.mod`, `go.sum`, the boundary test, instead of the npm files). It also writes the code-conventions doc.
+  - No M2 task starts before #32 merges.
+
