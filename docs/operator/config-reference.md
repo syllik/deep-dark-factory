@@ -24,7 +24,7 @@ Maps tiers and roles to agent adapters and models. Selection and fallback rules:
 
 | Key | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `tiers.deep` | list of entries (min 1) | yes | none | `sensitive` tasks (Planner, R1, R2 at `deep`) |
+| `tiers.deep` | list of entries (min 1) | yes | none | Planner and R2 on `sensitive` tasks |
 | `tiers.standard` | list of entries (min 1) | yes | none | the default tier of every role |
 | `tiers.routine` | list of entries (min 1) | no | none | reports and digests |
 | `tiers.fast` | list of entries (min 1) | no | none | read-only helpers |

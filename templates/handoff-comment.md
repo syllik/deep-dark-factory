@@ -15,6 +15,7 @@ Mode: <manual | supervisor>
 ### Waiting on owner
 
 - <task link> · `needs-owner` · <category>: <one-line question> (<link to the asking comment>)
+- <PR link> · owner action · <start reviewer session r1 | r2 at head `<full SHA>` | post comment <heading> on <target>>
 - <PR link> · ready for human merge at head `<full SHA>`
 
 ### Next

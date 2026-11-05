@@ -92,7 +92,7 @@ Inputs to the risk class ([policy.md](../concepts/policy.md#risk-classes)).
 
 - `lowMaxLines` (default 200): changed-line limit for `low`; lockfiles and pure renames are excluded from the count.
 - `docs`: paths that alone make a change `docs`. Agent-instruction files are never `docs`.
-- `sensitive`: any match makes the change `sensitive` (R1 + R2 at `deep`).
+- `sensitive`: any match makes the change `sensitive` (R1 + R2, R2 at `deep`).
 
 ```yaml
 risk:
@@ -146,7 +146,7 @@ planning:
 
 ### `change`
 
-- `branch`: branch name pattern for changes.
+- `branch`: branch name pattern for changes. `{type}` is the Conventional Commits type of the change (`feat`, `fix`, `docs`, `refactor`, `test`, `ci`, `chore`), `{n}` the task number, `{slug}` a short kebab-case slug.
 - `merge`: merge method; only `squash` (default).
 - `template`: optional change (PR/MR) body template, e.g. `.ddf/change-template.md`. The Publisher fills it; agent text goes only into the sanitized section.
 

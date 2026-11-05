@@ -43,7 +43,7 @@ Forge labels and comments that mirror DDF state for humans; the store is canonic
 See [lifecycle.md#conveyor](concepts/lifecycle.md#conveyor), [spec §10.2](specs/2026-11-03-ddf-v1-design.md#102-forge-github), [policy.md#merge-gate](concepts/policy.md#merge-gate).
 
 **reviewer set**
-The reviewers a change needs, taken from its risk class: R1 for `docs`, `low` and `revert`; R1 + R2 for `standard`; R1 + R2 at `deep` for `sensitive`. When R2 is not in the set, R1 also runs the hard-stop checklist.
+The reviewers a change needs, taken from its risk class: R1 for `docs`, `low` and `revert`; R1 + R2 for `standard`; R1 + R2, R2 at `deep`, for `sensitive`. When R2 is not in the set, R1 also runs the hard-stop checklist.
 See [policy.md#risk-classes](concepts/policy.md#risk-classes), [spec §6.2](specs/2026-11-03-ddf-v1-design.md#62-risk-classes-and-reviewers).
 
 **revision**

@@ -31,6 +31,7 @@ Tier rules:
 - Input: the task text and a bounded brief built from the integration branch.
 - Verdicts: `READY`, `DECOMPOSE`, `ASK`, `REJECT`; transitions in [lifecycle.md](lifecycle.md#planning).
 - May raise the risk class; never lowers it ([policy.md](policy.md#risk-classes)).
+- Tier chosen before the class is known: `deep` when the task text names a path the profile classes `sensitive` (a `risk.sensitive` glob, a `ciEntrypoints` entry, a forbidden path or a default hard-stop glob), otherwise `standard`. A pass below `deep` that returns `READY` proposing `sensitive` is discarded and the Planner re-runs once at `deep`; the re-run counts toward `maxRunsPerTask` and is not the invalid-result retry ([lifecycle.md](lifecycle.md#bounds)). A class raised to `sensitive` after planning (at publishing or by R1) does not re-run the Planner.
 - May propose `AGENT-DEFAULT` decisions when the spec is ambiguous but product intent is clear.
 - Writes the spec in English regardless of the task's language.
 - Bounds: 30 min timeout, 1 retry on invalid result ([lifecycle.md](lifecycle.md#bounds)).

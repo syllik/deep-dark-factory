@@ -24,7 +24,7 @@ Rationale: [spec §6.2](../specs/2026-11-03-ddf-v1-design.md#62-risk-classes-and
 | `docs` | only `risk.docs` paths; agent-instruction files are never `docs` | R1 |
 | `low` | code, changed lines ≤ `risk.lowMaxLines` (default 200, lockfiles and pure renames excluded from the count), no `risk.sensitive` or hard-stop path | R1 |
 | `standard` | other code | R1 + R2 |
-| `sensitive` | any `risk.sensitive` path (money, keys, auth, data, migrations) or default hard-stop globs (deploy, infrastructure, container files, IaC) | R1 + R2 at `deep` |
+| `sensitive` | any `risk.sensitive` path (money, keys, auth, data, migrations) or default hard-stop globs (deploy, infrastructure, container files, IaC) | R1 + R2, R2 at `deep` |
 | `revert` | an exact revert of one DDF merge commit, produced by DDF | R1 |
 
 Rules:

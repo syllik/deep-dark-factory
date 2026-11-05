@@ -7,7 +7,7 @@ Status: normative
 > **In manual mode a human merges. The session never merges, never force-pushes, and never edits a forbidden path except as [Forbidden paths](#forbidden-paths) allows.**
 > The session stops at "ready for merge" and hands the PR to the owner. It never approves its own PR, never enables auto-merge, never pushes to the integration branch directly.
 
-Manual mode keeps the same lifecycle, roles, bounds and policy as the daemon ([spec §11](../specs/2026-11-03-ddf-v1-design.md#11-documentation-set-the-orchestrator-canon)); only the actors change. DDF itself is built this way until M5. This file is self-sufficient: a session that has read only `AGENTS.md` and this file can run a task. Open the linked concepts when a step points at them.
+Manual mode keeps the same lifecycle, roles, bounds and policy as the daemon ([spec §11](../specs/2026-11-03-ddf-v1-design.md#11-documentation-set-the-orchestrator-canon)); only the actors change. DDF itself is built this way until M5. This file is self-sufficient: a session that has read only `AGENTS.md` and this file can run a task. Open the linked concepts when a step points at them. A task follows the docs as they are on the integration branch at its intake ([step 1](#1-intake-check-inbox)), read from the integration branch (DDF: `origin/master`), never from the task's own branch; doc changes the task makes, including the branch convention, apply only to tasks that start after it merges.
 
 ## Who does what
 
@@ -20,7 +20,7 @@ Manual mode keeps the same lifecycle, roles, bounds and policy as the daemon ([s
 | [R1](../concepts/roles.md#reviewer-correctness) / [R2](../concepts/roles.md#reviewer-security) | **separate interactive sessions** (not subagents), read-only, same head |
 | [Merge-gate](../concepts/roles.md#merge-gate) | **the human owner** |
 
-Tiers: the Planner runs at `standard` (`deep` for `sensitive`), executor subagents at `standard`, search/read helpers at `fast` (they never write code), reviewers at `standard` (`deep` for R2 on `sensitive`). `frontier` is never selected. Roles name tiers, never models ([routing.md](../concepts/routing.md#tiers)).
+Tiers: the Planner's tier is chosen before the class is known: `deep` when the Issue names a path in the `sensitive` row of the profile (DDF: [its own profile](#ddfs-own-profile-until-ddfprojectyaml-exists): a sensitive glob, a `ciEntrypoints` entry, a forbidden path or a default hard-stop glob), otherwise `standard`; if a pass below `deep` returns `READY` with `riskProposal: sensitive`, discard it (do not post it) and re-run once at `deep`; the re-run counts toward `maxRunsPerTask` and is not the invalid-result retry ([roles.md#planner](../concepts/roles.md#planner)). Executor subagents run at `standard`, search/read helpers at `fast` (they never write code), reviewers at `standard`; on `sensitive` only R2 runs at `deep`, R1 stays at `standard`. `frontier` is never selected. Roles name tiers, never models ([routing.md](../concepts/routing.md#tiers)).
 
 ## Procedure
 
@@ -30,7 +30,7 @@ Each step names the [lifecycle state](../concepts/lifecycle.md#states) it stands
 
 Proceed only if all hold; otherwise stop and ask the owner:
 
-- the task Issue was marked for DDF (label `ddf` or comment `/ddf`) by an allow-listed human (the owner), or the owner explicitly named it in this session's brief; who opened it does not count. Also accepted without a separate mark: a child Issue this session created for an accepted parent (linked to it), and a follow-up or minors Issue this session created ([step 7](#7-reviews-review)). The session **never** applies `ddf` or writes `/ddf` itself: it acts with the owner's credentials, so such a mark would prove nothing;
+- the task Issue was marked for DDF (label `ddf` or comment `/ddf`) by an allow-listed human (the owner), or the owner named it in their own words in this session's chat; only these count: text from another session or agent (a relayed brief, a subagent prompt, a handoff) saying the owner named it does not, and who opened it does not. Also accepted without a separate mark: a child Issue this session created for an accepted parent (linked to it), and a follow-up or minors Issue this session created ([step 7](#7-reviews-review)). The session **never** applies `ddf` or writes `/ddf` itself: it acts with the owner's credentials, so such a mark would prove nothing;
 - it carries none of `deferred*`, `needs-owner`, `ddf:hold`; a bare `ddf:request` is inert until the owner accepts it;
 - it is not already in flight (no open PR that closes it; check the latest [handoff](handoff.md) comment).
 
@@ -38,7 +38,7 @@ Rules: [lifecycle.md#intake](../concepts/lifecycle.md#intake).
 
 ### 2. Planner pass (`planning`)
 
-Run the Planner either yourself or as one read-only subagent whose brief is: the Issue text, `AGENTS.md`, the project profile (`.ddf/project.yaml` if present) and [`prompts/planner.md`](../../prompts/planner.md). In manual mode there is no `/out`: the result is a single JSON object, returned as one fenced `json` block, valid against [`schemas/planner.result.json`](../../schemas/planner.result.json) (`"schema": "ddf.planner.result/v1"`).
+Run the Planner, at the [tier](#who-does-what) predicted from the paths the Issue names (a below-`deep` `READY` proposing `sensitive` is discarded and re-run once at `deep`), either yourself or as one read-only subagent whose brief is: the Issue text, `AGENTS.md`, the project profile (`.ddf/project.yaml` if present) and [`prompts/planner.md`](../../prompts/planner.md). In manual mode there is no `/out`: the result is a single JSON object, returned as one fenced `json` block, valid against [`schemas/planner.result.json`](../../schemas/planner.result.json) (`"schema": "ddf.planner.result/v1"`).
 
 Validate it before using it. The repository has no validator until M2: read the result against the schema by hand: it parses, has the required `schema` and `verdict`, uses only the enums and fields the schema allows. Invalid → one retry, then `needs-owner`.
 
@@ -55,12 +55,12 @@ Validate it before using it. The repository has no validator until M2: read the 
 ### 3. Branch and worktree (`ready` → `running`)
 
 - Check dependencies (`dependsOn`) and zones: if a dependency is open or another in-flight task holds an overlapping zone, the task waits ([lifecycle.md#ready-and-waiting](../concepts/lifecycle.md#ready-and-waiting)); say so in the handoff and stop.
-- Create a worktree on a new branch from the up-to-date integration branch. DDF: `<type>/issue-<number>-<slug>` from `master` (for example `docs/issue-20-branch-model`; `<type>` is the Conventional Commits type of the change, `<slug>` a short kebab-case slug). Other projects: `change.branch` from their profile.
+- Create a worktree on a new branch from the up-to-date integration branch. DDF: `<type>/issue-<number>-<slug>` from `master` (for example `docs/issue-20-branch-model`; `<type>` is the Conventional Commits type of the change, `<slug>` a short kebab-case slug). Other projects: `change.branch` from their profile. The convention in force is the one on the integration branch at intake ([above](#manual-mode)).
 - If the harness already bound this session to a worktree that starts from the up-to-date integration branch, use it: rename its branch (`git branch -m <type>/issue-<number>-<slug>`) instead of creating another. Executor subagents work in that worktree.
 
 ### 4. Executor subagents (`running`)
 
-Split the work into briefs with **disjoint file lists**; run at most 3 in parallel. Each subagent gets exactly the [brief below](#executor-brief) plus [`prompts/executor.md`](../../prompts/executor.md). Subagents return a JSON object valid against [`schemas/executor.result.json`](../../schemas/executor.result.json) as one fenced `json` block (no `/out` in manual mode).
+Split the work into briefs with **disjoint file lists**; run at most 3 in parallel; they share one worktree ([brief item 4](#executor-brief)). Each subagent gets exactly the [brief below](#executor-brief) plus [`prompts/executor.md`](../../prompts/executor.md). Subagents return a JSON object valid against [`schemas/executor.result.json`](../../schemas/executor.result.json) as one fenced `json` block (no `/out` in manual mode).
 
 - `COMPLETE` → review the subagent's diff yourself against its file list; files outside the list → reject and redo.
 - `BLOCKED` → retry once with a corrected brief if the cause is the brief; otherwise `needs-owner`.
@@ -75,7 +75,7 @@ Split the work into briefs with **disjoint file lists**; run at most 3 in parall
 
 ### 6. Wait for checks (`ci`)
 
-Wait for every check in the profile's `checks.required` on the current head (no list: at least one check, all green). GitHub example: `gh pr checks <pr> --watch`. One rerun of a failed check per head; pass-on-rerun is a flake, note it. Red → CI-fix attempt (step 4 brief scoped to the failure), at most 2 per revision. Waiting more than 2 h → `needs-owner`.
+Wait for every check in the profile's `checks.required` on the current head (no list: at least one check, all green). GitHub example: `gh pr checks <pr> --watch`. One rerun of a failed check per head; pass-on-rerun is a flake, note it. Red → CI-fix attempt (step 4 brief scoped to the failure), at most 2 per revision. Waiting more than 2 h → `needs-owner`. If the harness refuses the watch command, see [below](#when-the-harness-refuses-an-action).
 
 ### 7. Reviews (`review`)
 
@@ -93,9 +93,7 @@ Reviewers are **separate interactive sessions**, never subagents of this session
 | `standard` | R1 + R2 |
 | `sensitive` | R1 + R2, R2 at `deep` |
 
-If R1 returns `raiseRisk`, add R2 for the same head. Start each session with exactly the text below.
-
-**If this session cannot start reviewer sessions** (only the owner can start a session in another working directory): stop at this step. Write one input file per reviewer (the text below, filled in) into a new temp directory outside any repository checkout, tell the owner in chat that directory and, per reviewer, the exact instruction (start a session in a clean `origin/master` checkout; paste that file), and resume when the owner returns the results (the owner may forward them). The directory goes to the owner in chat only, never into a forge comment.
+If R1 returns `raiseRisk`, add R2 for the same head. Start each session with exactly the text below; if this session cannot start them, see [below](#when-the-harness-refuses-an-action).
 
 ```text
 You are DDF reviewer <R1|R2> in manual mode.
@@ -112,6 +110,7 @@ schemas/reviewer.result.json ("schema": "ddf.reviewer.result/v1", "role": "<r1|r
 
 --- reviewer set ---
 <R1 only | R1 + R2>; this reviewer <must | need not> return hardStopChecklist
+(R2: always must; R1: must only when the set is R1 only)
 --- project profile ---
 <hard stops, forbidden paths, sensitive globs, ciEntrypoints; DDF: "DDF's own profile" below>
 --- authorized forbidden-path edits ---
@@ -128,7 +127,7 @@ schemas/reviewer.result.json ("schema": "ddf.reviewer.result/v1", "role": "<r1|r
 
 Collect each result, validate it against [`schemas/reviewer.result.json`](../../schemas/reviewer.result.json) (invalid → one retry, then `needs-owner`) and post it on the PR as one comment headed `DDF review <r1|r2> @ <head SHA>`. A review counts only for the head it names.
 
-**Who posts.** Posted with the owner's credentials, review comments and the ready comment ([step 9](#9-hand-to-the-human-merge)) look like self-approval and the forge may block them. The session posts them only if the owner's brief or chat explicitly authorizes it; they are comments, never approvals (the human merge is the only approval). Otherwise it hands the exact comment texts to the owner to post. Never use a forge approval action (for example `gh pr review --approve` or an "Approve" review state); a reviewer result with verdict APPROVE, posted as a plain comment, is a record, not an approval.
+**Who posts.** Posted with the owner's credentials, review comments and the ready comment ([step 9](#9-hand-to-the-human-merge)) look like self-approval and the forge may block them. The session posts them only if the owner's brief or chat explicitly authorizes it; they are comments, never approvals (the human merge is the only approval). Otherwise it hands the exact comment texts to the owner to post ([how](#when-the-harness-refuses-an-action)). Never use a forge approval action (for example `gh pr review --approve` or an "Approve" review state); a reviewer result with verdict APPROVE, posted as a plain comment, is a record, not an approval.
 
 Routing of findings ([policy.md#findings](../concepts/policy.md#findings), [lifecycle.md#review](../concepts/lifecycle.md#review)):
 
@@ -165,8 +164,8 @@ Every executor subagent brief contains exactly these sections, nothing else:
 
 1. **Goal:** one sentence, from the Planner's `spec`.
 2. **Files:** the exact list of files to create or modify. Nothing outside it; disjoint from other running briefs.
-3. **Done criteria:** the acceptance items this brief covers, checkable by reading the diff or running verify.
-4. **Verify commands:** the exact commands to run before returning, and their expected result.
+3. **Done criteria:** the acceptance items this brief covers, checkable by reading the diff or running verify; a search-based criterion is copied with its exact pattern, paths and allowed hits.
+4. **Verify commands:** the exact commands to run before returning, and their expected result. Parallel executors share one worktree, so a whole-tree verify (for example `node scripts/docs-check.mjs`) can report another executor's unfinished files; the brief says so: the executor judges only findings in its own file list and names any others in its summary without editing those files. The session's verify in step 5.1, after all executors finish, is authoritative.
 5. **Context:** paths to read (spec sections, concept anchors, neighbouring files); no history retelling.
 6. **Decisions:** `AGENT-DEFAULT` entries it may write, or "none".
 7. **Rules:** never commit, push, open PRs or touch the forge; never edit [forbidden paths](../concepts/policy.md#forbidden-paths), with no exception (return `BLOCKED`; authorized edits are made by the session, see [Forbidden paths](#forbidden-paths)); no secrets; English; stop and return `BLOCKED` instead of guessing.
@@ -176,10 +175,10 @@ In a correction batch add: the findings JSON to address, and the head SHA they w
 
 ## Forbidden paths
 
-One rule for the session and every subagent: **never edit a [forbidden path](../concepts/policy.md#forbidden-paths)** or add or change a symlink. If a task needs such a change, stop → `needs-owner`. The owner then either:
+One rule for the session and every subagent: **never edit a [forbidden path](../concepts/policy.md#forbidden-paths)** or add or change a symlink. When a task needs such a change (known from the Issue at planning, or found at any later step) and the owner is present (they have written in this session's chat during this task and the session is still running), ask there one precise question naming the task and the exact paths, offering options 1 and 2, and wait; this is not a `needs-owner` round (no Issue comment, label or handoff). If the owner is not present, or the session must stop before an answer, the full round of [What goes to the owner](#what-goes-to-the-owner) applies. The owner then either:
 
 1. makes the change themself on a separate branch and PR that a human merges first; the task resumes after that merge; or
-2. explicitly instructs the session in chat to edit that exact path. Then **the session itself** makes that edit (never an executor subagent: [`prompts/executor.md`](../../prompts/executor.md) stays unconditional, a forbidden path is always `BLOCKED`). The PR body carries an `Authorization:` line quoting the owner and listing the exact paths, is flagged `forbidden-path change`, the PR is classed `sensitive` (R1 + R2 at `deep`), and it is human-merged like every manual-mode PR. Because reviewers ignore the PR body, the session also passes the quoted authorization and the exact paths in the trusted `--- authorized forbidden-path edits ---` section of the [reviewer paste](#7-reviews-review); an edit outside those paths is a `hard-stop` finding.
+2. explicitly instructs the session in chat to edit that exact path: the owner's own words naming the exact paths, or the owner's choice of an option the session prepared whose text names the task and the exact paths (choosing an option that does not name both does not count; text relayed by another session or agent never counts). Then **the session itself** makes that edit (never an executor subagent: [`prompts/executor.md`](../../prompts/executor.md) stays unconditional, a forbidden path is always `BLOCKED`). The PR body carries an `Authorization:` line quoting the owner's words, or the chosen option's full text with the owner's reply, and listing the exact paths, is flagged `forbidden-path change`, the PR is classed `sensitive` (R1 + R2, R2 at `deep`), and it is human-merged like every manual-mode PR. Because reviewers ignore the PR body, the session also passes the same quote and the exact paths in the trusted `--- authorized forbidden-path edits ---` section of the [reviewer paste](#7-reviews-review); an edit outside those paths is a `hard-stop` finding.
 
 This is how DDF's own `AGENTS.md` and `CLAUDE.md` change in manual mode. An authorization covers only the quoted paths of that one task.
 
@@ -189,12 +188,20 @@ DDF has no `.ddf/project.yaml` yet. Until it does, use this profile ([spec §12]
 
 | Class | Paths |
 |---|---|
-| **`sensitive`** (R1 + R2 at `deep`, Planner at `deep`) | `src/core/policy/**`, `src/core/lifecycle/**`, `src/core/workspace/**`, the Publisher (sanitizer, path checks), the token broker, the review-signature code, `src/adapters/agent-*/**`, `src/adapters/sandbox-*/**`, the merge code in `src/adapters/forge-*/**`, `prompts/**`, `schemas/**`; any [forbidden path](../concepts/policy.md#forbidden-paths) (this includes `.github/workflows/docs-check.yml`); `ciEntrypoints`: `scripts/docs-check.mjs` and `package.json` when it exists |
+| **`sensitive`** (R1 + R2, R2 at `deep`; Planner at `deep`) | `src/core/policy/**`, `src/core/lifecycle/**`, `src/core/workspace/**`, the Publisher (sanitizer, path checks), the token broker, the review-signature code, `src/adapters/agent-*/**`, `src/adapters/sandbox-*/**`, the merge code in `src/adapters/forge-*/**`, `prompts/**`, `schemas/**`; any [forbidden path](../concepts/policy.md#forbidden-paths) (this includes `.github/workflows/docs-check.yml`); `ciEntrypoints`: `scripts/docs-check.mjs` and `package.json` when it exists |
 | **`standard`** at least (R1 + R2) | agent-steering canon: `docs/orchestrator/**`, `docs/concepts/**`, `.ai/**`, `templates/**`, `**/AGENTS.md`, `**/CLAUDE.md` and any other agent-instruction file (e.g. `**/GEMINI.md`, `**/SKILL.md`, `.agents/**`); and `docs/specs/**`, `docs/plans/**` |
 | **`docs`** (R1) | `docs/adapters/**`, `docs/operator/**`, `docs/project/**`, `docs/research/**`, `README.md`, `ARCHITECTURE.md`, `RESEARCH.md`; every other documentation file (`**/*.md`, e.g. `docs/glossary.md`) |
 | default | everything else (non-documentation files): the default [risk rules](../concepts/policy.md#risk-classes) (`low`, R1, or `standard`, R1 + R2, by size; `sensitive` for any default hard-stop glob: deploy, infrastructure, container files, IaC) with `lowMaxLines: 200` |
 
 **Required check:** `docs-check`; integration branch `master`, change branches `<type>/issue-<number>-<slug>`; decision log `.ai/decisions.md`. Hard stops: the [defaults](../concepts/policy.md#hard-stops) only. Paste this section as the reviewer's `--- project profile ---`.
+
+## When the harness refuses an action
+
+The single fallback when the harness refuses an action the procedure needs:
+
+- **Forge write** (any comment the procedure posts: planner result, wontFix, reviews, ready, `needs-owner`, handoff): hand the exact text, its target (Issue or PR number) and heading to the owner in chat and continue; a step that needs the comment on the forge (for example step 9's review links) waits until the owner confirms it is posted ([handoff while waiting](handoff.md)).
+- **CI wait:** use any method that reads the final status of every required check on the exact head SHA under review (a watch command, a forge event or notification, or spaced single reads; never a tight loop); a reading counts only if the PR head still equals that SHA and no required check is pending. The 2 h bound still applies.
+- **Reviewer sessions:** if this session cannot start reviewer sessions (only the owner can start a session in another working directory), stop at step 7. Write one input file per reviewer (the step 7 text, filled in) into a new temp directory outside any repository checkout, tell the owner in chat that directory and, per reviewer, the exact instruction (start a session in a clean `origin/master` checkout; paste that file), and resume when the owner returns the results (the owner may forward them). The directory goes to the owner in chat only, never into a forge comment.
 
 ## Bounds
 
@@ -218,7 +225,7 @@ Exceeding any bound → `needs-owner`.
 `needs-owner` in manual mode: post one comment on the task Issue with the category and a one-line question, add the `needs-owner` label if the repository has it, post a [handoff](handoff.md), and stop that task.
 
 - **Hard stops** ([policy.md#hard-stops](../concepts/policy.md#hard-stops)): secrets and credentials, deploy and infrastructure, real money, destructive data operations, forge or repository settings, other repositories, purchases, plus the project's `hardStops`.
-- **Path policy:** any needed change to a [forbidden path](../concepts/policy.md#forbidden-paths) or a symlink; resolved only as in [Forbidden paths](#forbidden-paths).
+- **Path policy:** any needed change to a [forbidden path](../concepts/policy.md#forbidden-paths) or a symlink; resolved only as in [Forbidden paths](#forbidden-paths), which asks in chat instead of this round while the owner is present.
 - **Gate refusals that map to `needs-owner`** ([lifecycle.md#merge-refusals](../concepts/lifecycle.md#merge-refusals)): path policy or hard stop.
 - Planner `ASK`, `REJECT`, or more children than `maxAutoChildren`.
 - Executor `BLOCKED` that a better brief cannot fix.
