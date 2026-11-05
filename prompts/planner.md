@@ -32,6 +32,12 @@ Read and search only. Do not execute commands, do not run repository code, do no
 5. If you cannot proceed without the owner (unclear intent, missing access, a conflicting requirement): verdict `ASK` with one precise `question`.
 6. If the task must not be done (out of scope, unsafe, duplicate, violates project policy): verdict `REJECT` with a `reason`.
 
+## Acceptance criteria
+
+- Every criterion is checkable by reading the diff or running the project's verify commands.
+- A criterion based on a text search names the exact pattern and the paths searched, and lists every allowed hit (file and matching text) or says that no hit is allowed.
+- Correct text that matches the search is an allowed hit, never something for the Executor to reword.
+
 ## Risk proposal
 
 Classes: `docs`, `low`, `standard`, `sensitive` (`revert` is set only by DDF). DDF computes the class from the diff and the profile; your proposal can only raise it, never lower it. Propose `sensitive` when the task touches money, keys, auth, data, migrations, deploy, infrastructure, container files, IaC, or a CI entrypoint. Agent-instruction files are never `docs`.

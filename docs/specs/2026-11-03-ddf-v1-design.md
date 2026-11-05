@@ -189,7 +189,7 @@ Effective level per §3. No level promotes to production.
 | `docs` | only `risk.docs` paths; agent-instruction files are never `docs` | R1 |
 | `low` | code, changed lines ≤ `risk.lowMaxLines` (default 200, lockfiles and pure renames excluded from the count), no `risk.sensitive` or hard-stop path | R1 |
 | `standard` | other code | R1 + R2 |
-| `sensitive` | any `risk.sensitive` path (money, keys, auth, data, migrations) or default hard-stop globs (deploy, infrastructure, container files, IaC) | R1 + R2 at `deep` |
+| `sensitive` | any `risk.sensitive` path (money, keys, auth, data, migrations) or default hard-stop globs (deploy, infrastructure, container files, IaC) | R1 + R2, R2 at `deep` |
 | `revert` | an exact revert of one DDF merge commit, produced by DDF | R1 |
 
 The class is computed from the diff and the profile. The Planner may raise it; R1 may raise it (adds R2). Nothing lowers it. When R2 is not in the set, R1 also runs the hard-stop checklist.
@@ -267,6 +267,8 @@ reviewers:
   r2DifferentProvider: false         # require R2 on a different provider than the Executor
 ```
 
+In `change.branch`, `{type}` is the Conventional Commits type of the change (`feat`, `fix`, `docs`, `refactor`, `test`, `ci`, `chore`), `{n}` the task number and `{slug}` a short kebab-case slug.
+
 ## 7. Roles and routing
 
 ### 7.1 Roles and default tiers
@@ -279,6 +281,8 @@ reviewers:
 | R2 security/data | `standard`; `deep` for `sensitive` | read/search only, no command execution | findings + hard-stop checklist, verdict |
 | Helpers (subagents) | `fast` for search/read; never write code | read-only | — |
 | Reports, digests | `routine` | none | — |
+
+The Planner's tier is chosen before the class is known: `deep` when the task text names a path the profile classes `sensitive` (a `risk.sensitive` glob, a `ciEntrypoints` entry, a forbidden path or a default hard-stop glob), otherwise `standard`. If a pass below `deep` returns `READY` with risk proposal `sensitive`, that result is discarded (not posted as the planner result) and the Planner re-runs once at `deep`; the re-run counts toward `maxRunsPerTask` (§5.3) and is not the invalid-result retry. A class raised to `sensitive` after planning (at publishing or by R1) does not re-run the Planner; it changes the reviewer set only.
 
 Reviewers judge the diff, the spec and the CI results; they do not execute repository code. `frontier` is never selected by DDF. Projects may only raise tiers or set `r2DifferentProvider`.
 
@@ -429,7 +433,7 @@ templates/project/  .ddf/project.yaml, issue forms (task, request, bug), AGENTS.
 
 ## 12. DDF's own profile
 
-DDF is a pilot of itself (D1). Its profile marks every security-relevant area as `sensitive` (R1 + R2 at `deep`): `src/core/policy/**`, `src/core/lifecycle/**`, `src/core/workspace/**` (hook neutralisation, patch apply), the Publisher (sanitizer, path checks), the token broker, the review-signature code, `src/adapters/agent-*/**` (settings isolation, read-only tools), `src/adapters/sandbox-*/**` (firewall), the merge code in `src/adapters/forge-*/**`, `prompts/**` and `schemas/**`. Combined with §4.4 (the daemon runs only from a maintainer-promoted ref), an autonomously merged change to DDF cannot alter the running factory until a human promotes it.
+DDF is a pilot of itself (D1). Its profile marks every security-relevant area as `sensitive` (R1 + R2, R2 at `deep`): `src/core/policy/**`, `src/core/lifecycle/**`, `src/core/workspace/**` (hook neutralisation, patch apply), the Publisher (sanitizer, path checks), the token broker, the review-signature code, `src/adapters/agent-*/**` (settings isolation, read-only tools), `src/adapters/sandbox-*/**` (firewall), the merge code in `src/adapters/forge-*/**`, `prompts/**` and `schemas/**`. Combined with §4.4 (the daemon runs only from a maintainer-promoted ref), an autonomously merged change to DDF cannot alter the running factory until a human promotes it.
 
 ## 13. Migration
 
@@ -535,3 +539,6 @@ Answers, evidence and probe definitions: `docs/research/2026-11-m0-facts.md`; de
 - 2026-11-04 M0 review: §7.3 — adapter checks the routed credential is present before starting a CLI; missing → credential failure, not a failed run (facts: docs/research/2026-11-m0-facts.md#agent-clis-16-item-4)
 - 2026-11-05 Issue #20: §5.3 — "revision" defined (initial execution or one correction batch, CI-fix pushes counted inside) (see docs/concepts/lifecycle.md#revision)
 - 2026-11-05 Issue #20: §4.4 — no separate release branch; the daemon runs from a release tag on `master` (owner decision 2026-11-05, see .ai/decisions.md)
+- 2026-11-05 Issue #22: §6.2, §12 — wording: on `sensitive` only R2 runs at `deep`; R1 stays at `standard` as in §7.1; no behaviour change (see docs/concepts/roles.md)
+- 2026-11-05 Issue #22: §7.1 — Planner tier predicted from the paths the task names; a `sensitive` proposal from a pass below `deep` re-runs the Planner once at `deep`, counted in `maxRunsPerTask` (see docs/concepts/roles.md#planner)
+- 2026-11-05 Issue #22: §6.7 — `change.branch` placeholders `{type}`, `{n}`, `{slug}` defined (see docs/project/project-yaml-reference.md#change)
