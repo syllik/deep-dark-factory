@@ -13,7 +13,7 @@ Status: proposed; accepted when the owner merges this PR
 - `src/core/<module>/` per core module; `src/core/ports/` holds the port interfaces of [spec §4.2](../specs/2026-11-03-ddf-v1-design.md#42-ports-and-v1-adapters) (types only).
 - `src/adapters/forge-local/`, `src/adapters/sandbox-fake/`.
 - The engine (tick: advance tasks through pure lifecycle and policy, call ports, record intents; recovery) lives in `src/daemon/` (OD-5). The fake agent lives in `test/fakes/` (OD-6). End-to-end scenarios live in `test/e2e/`. Unit tests sit next to their module as `*.test.ts`. No `src/cli` in M2.
-- Core never imports adapters or the daemon. Adapters import only core (ports, model and the workspace git helper). Only the daemon wires them.
+- Core never imports adapters or the daemon. Adapters import only core: ports, model, the workspace git helper and the store's public entry `src/core/store/index.ts` (OD-14; [spec §4.4](../specs/2026-11-03-ddf-v1-design.md#44-boundaries) forbids only core → adapters and adapter → adapter). Only the daemon wires them.
 - `lifecycle`, `policy` and `scheduler` are pure: they take a clock and inputs and do no I/O. `store` is the only module that touches SQLite ([M0 fact](../research/2026-11-m0-facts.md#nodesqlite-16-item-6), §16.6 line in [`.ai/decisions.md`](../../.ai/decisions.md)). `workspace` is the only core module that spawns `git`.
 
 **Tech Stack:**
@@ -88,7 +88,7 @@ Risk classes below come from [DDF's own profile](../orchestrator/manual-mode.md#
 **Depends on:** this plan merged. Lands before Task 1 so later classes are computed from it.
 
 - [ ] **Step 1:** `ciEntrypoints` += `package-lock.json`, `tsconfig.json`, `test/boundaries.test.ts`.
-- [ ] **Step 2:** `sensitive` += `src/core/publisher/**`, `src/core/store/migrations/**` (merge code stays in forge adapters, already sensitive).
+- [ ] **Step 2:** `sensitive` += `src/core/publisher/**`, `src/core/store/migrations/**`, `src/daemon/**` (merge code stays in forge adapters, already sensitive; the daemon wires the gate to that merge, OD-7).
 - [ ] **Verify:** `node scripts/docs-check.mjs` → `docs-check: OK`.
 
 ### Task 1: Scaffold and CI
@@ -113,7 +113,7 @@ Risk classes below come from [DDF's own profile](../orchestrator/manual-mode.md#
 - [ ] **Step 1:** Types for Task, Run, Change, Review, Finding, Question, Decision, Intent, Event; `ddf.<name>/v1` ID constants (OD-8); the task-key digest ([spec §4.5](../specs/2026-11-03-ddf-v1-design.md#45-store-and-intents)).
 - [ ] **Step 2:** Port interfaces from [spec §4.2](../specs/2026-11-03-ddf-v1-design.md#42-ports-and-v1-adapters), every forge write with dry-run.
 - [ ] **Step 3:** `results.ts`: validate role results with `ajv` against `schemas/*.result.json`; tests with the `schemas/examples/` files and one invalid result per schema.
-- [ ] **Step 4:** `test/boundaries.test.ts` rules: core ↛ adapters/daemon/cli; core ↛ `node:http|https|net|tls|dgram|dns` or global `fetch`; only `src/core/workspace/**` imports `node:child_process`; only `src/core/store/**` imports `node:sqlite`; adapters ↛ other adapters. A fixture proves each rule fails.
+- [ ] **Step 4:** `test/boundaries.test.ts` rules: core ↛ adapters/daemon/cli; core ↛ `node:http|https|net|tls|dgram|dns` or global `fetch`; only `src/core/workspace/**` imports `node:child_process`; only `src/core/store/**` imports `node:sqlite`; adapters ↛ other adapters; adapters import `src/core/store` only through `src/core/store/index.ts`, a deeper import fails (OD-14; under its option (b) any adapter import of `src/core/store/**` fails). A fixture proves each rule fails.
 - [ ] **Verify:** `npm run verify`.
 
 ### Task 3: Store
@@ -201,9 +201,9 @@ Risk classes below come from [DDF's own profile](../orchestrator/manual-mode.md#
 
 **Files:** Create `src/adapters/forge-local/**`.
 **Risk class:** `sensitive` (merge code in `src/adapters/forge-*/**` row).
-**Depends on:** Tasks 3, 8.
+**Depends on:** Tasks 3, 8, 9 (`sandbox-fake` for checks).
 
-- [ ] **Step 1:** Full forge port per [forge-local.md#contract](../adapters/forge-local.md#contract) on a `file://` bare repository plus the store: tasks; intake actor = local operator; change = branch with task-key marker; reviews in the store.
+- [ ] **Step 1:** Full forge port per [forge-local.md#contract](../adapters/forge-local.md#contract) on a `file://` bare repository plus the store (through its public entry, OD-14): tasks; intake actor = local operator; change = branch with task-key marker; reviews in the store.
 - [ ] **Step 2:** Checks = verify through the sandbox port; merge by compare-and-swap ref update pinned to the head ([spec §10.1](../specs/2026-11-03-ddf-v1-design.md#101-forge-local)); revert; dry-run for every write.
 - [ ] **Step 3:** Tests: moved integration branch → `behind base`; moved head → merge fails (probe 8).
 - [ ] **Verify:** `npm run verify`.
@@ -212,7 +212,7 @@ Risk classes below come from [DDF's own profile](../orchestrator/manual-mode.md#
 
 **Files:** Create `src/core/publisher/**`.
 **Risk class:** `sensitive` (Publisher row, `src/core/publisher/**` from Task 0).
-**Depends on:** Tasks 4, 8.
+**Depends on:** Tasks 4, 8, 9 (`sandbox-fake` for the local gate, the secrets fake for redaction).
 
 - [ ] **Step 1:** Apply the patch to a clean clone (workspace); path policy and risk class on the applied tree; local gate through the sandbox port before push; one commit and one push per revision ([roles.md#publisher](../concepts/roles.md#publisher)).
 - [ ] **Step 2:** Change body and squash message from [`change-template.md`](../../templates/project/.ddf/change-template.md); sanitizer for closing keywords, `[skip ci]`-style directives and mentions; `Closes` only for the task.
@@ -222,7 +222,7 @@ Risk classes below come from [DDF's own profile](../orchestrator/manual-mode.md#
 ### Task 12: Engine and recovery
 
 **Files:** Create `src/daemon/**` (OD-5).
-**Risk class:** `standard` (default row by size) unless it touches a sensitive path.
+**Risk class:** `sensitive` (`src/daemon/**` row from Task 0, OD-7). Under OD-7 option (b): at least `standard` (R1 + R2) whatever its size.
 **Depends on:** Tasks 3, 6, 7, 9, 10, 11.
 
 - [ ] **Step 1:** Tick: read forge → lifecycle, policy and scheduler decisions → port calls; each forge write wrapped in an intent; run timeouts from the clock; dry-run mode.
@@ -260,7 +260,7 @@ Each PR is branched from up-to-date `master` after its dependencies merged; at m
 ```text
 0 → 1 → 2 ─┬─ wave A: 3 store | 4 policy A | 7 scheduler
            ├─ wave B: 8 workspace | 9 fakes | 5 policy B (after 4)
-           ├─ wave C: 6 lifecycle (after 5) | 10 forge-local (after 3, 8) | 11 publisher (after 4, 8)
+           ├─ wave C: 6 lifecycle (after 5) | 10 forge-local (after 3, 8, 9) | 11 publisher (after 4, 8, 9)
            └─ 12 engine (after 3, 6, 7, 9, 10, 11) → 13 e2e → 14 close-out
 ```
 
@@ -280,7 +280,7 @@ Tasks assume each **Recommendation**.
 
 **OD-6 Fake agent location.** Options: `test/fakes/agent-fake.ts`; `src/adapters/agent-fake/`. **Recommendation:** `test/fakes/`. Pros: not a V1 adapter, cannot be wired into a release, default risk rules. Cons: `src/adapters/agent-fake/` would match `src/adapters/agent-*/**` → `sensitive`, R2 at `deep` for test code; the two fakes live in different trees (`sandbox-fake` stays in `src/adapters/` because §4.2 names it an adapter).
 
-**OD-7 DDF profile additions (Task 0).** Options: add `ciEntrypoints` `package-lock.json`, `tsconfig.json`, `test/boundaries.test.ts` and `sensitive` `src/core/publisher/**`, `src/core/store/migrations/**`; leave the profile as it is. **Recommendation:** add them as Task 0, before Task 1. Pros: the Publisher row gets a path; migrations and CI inputs get R2. Cons: more R2-at-`deep` reviews; spec §12 prose may want the same paths (a Changelog line if so).
+**OD-7 DDF profile additions (Task 0).** Options: (a) add `ciEntrypoints` `package-lock.json`, `tsconfig.json`, `test/boundaries.test.ts` and `sensitive` `src/core/publisher/**`, `src/core/store/migrations/**`, `src/daemon/**`; (b) as (a) without `src/daemon/**`, and this plan classes Task 12 at least `standard` (R1 + R2) whatever its size; (c) leave the profile as it is. **Recommendation:** (a), as Task 0, before Task 1. Pros: the Publisher row gets a path; migrations and CI inputs get R2; the daemon calls `evaluateMerge` before the forge merge, writes and reconciles intents and passes the review-signing key from the secrets port, so it is reviewed like the gate and merge code it drives, and so is every later `src/daemon/**` change, not only Task 12. Cons: more R2-at-`deep` reviews (Task 12 and every later daemon PR); spec §12 prose may want the same paths (a Changelog line if so). Cons of (b): it covers Task 12 only; a later daemon change of ≤ 200 lines falls to `low` (R1 only). Narrowing (a) to the merge-call and intent/recovery files is not offered: those files do not exist before Task 12, so their globs would be guesses.
 
 **OD-8 Versioned schemas for internal records** (Task, Run, … [§4.1](../specs/2026-11-03-ddf-v1-design.md#41-core-no-network-no-forge-no-provider)). Options: TypeScript types plus `ddf.<name>/v1` ID constants stored with each persisted JSON payload, JSON Schema files only for data that crosses a trust boundary (role results, config); JSON Schema for every record. **Recommendation:** the first. Pros: no duplicate of the types. Cons of the alternative: more `schemas/**` files, all `sensitive`.
 
@@ -293,6 +293,8 @@ Tasks assume each **Recommendation**.
 **OD-12 Required check shape.** Options: one job `verify`; separate `typecheck`, `test`, `boundaries` checks. **Recommendation:** one job `verify`. Pros: matches the [§6.7](../specs/2026-11-03-ddf-v1-design.md#67-project-profile) example `checks.required: [verify]`; one ruleset entry. Cons: a failure needs the log to see which step broke.
 
 **OD-13 Action pinning in the new workflow.** Options: full commit SHA; major tags as in `docs-check.yml`. **Recommendation:** full commit SHA. Pros: immutable inputs to CI. Cons: manual bumps; a later follow-up may pin `docs-check.yml` too (forbidden path, owner).
+
+**OD-14 Adapter access to the store.** `forge-local` keeps tasks, reviews and findings in the DDF store ([spec §10.1](../specs/2026-11-03-ddf-v1-design.md#101-forge-local)), and only `src/core/store/**` may import `node:sqlite`. Options: (a) adapters import the store through its public entry `src/core/store/index.ts`; the boundary test fails on a deeper import into `src/core/store/**`; (b) a narrow store port in `src/core/ports/` (types only) that `src/core/store` implements and the daemon passes to `forge-local`; the boundary test fails on any adapter import of `src/core/store/**`. **Recommendation:** (a). Pros: spec §4.4 forbids only core → adapters and adapter → adapter; no extra interface; `forge-local` tests run on a real file store in a temp dir. Cons: an adapter can reach every operation the store entry exports, intents and leases included; the store's public API becomes an adapter contract. Pros of (b): adapters see only what `forge-local` needs; a fake can stand in for the store. Cons of (b): one more port to design in Task 2 before the store exists, kept in step with the store by hand.
 
 ## M2 exit
 
