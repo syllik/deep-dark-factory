@@ -12,7 +12,7 @@ Nothing on this page is installable yet. It describes the target layout that M5 
 |---|---|
 | Service user | dedicated non-admin OS user `ddf`, private home (mode 700) |
 | Daemon | `ddfd`, single instance per host (exclusive file lock), started by launchd (macOS) or systemd (Linux) as `ddf` |
-| DDF code | a checkout of a maintainer-promoted ref of DDF (the production branch or a release tag), never the integration branch |
+| DDF code | a checkout of a maintainer-promoted ref of DDF: a release tag (a maintainer-made tag on a `master` commit that passed CI), never the moving tip of the integration branch |
 | Container runtime | colima on macOS, Docker on Linux ([sandbox-docker](../adapters/sandbox-docker.md)) |
 | Operator config | a private repository or folder chosen by the operator, scaffolded by `ddf setup` ([config-reference.md](config-reference.md)) |
 | Secrets | `~ddf/.config/ddf/secrets/`, mode 0600, never in Git |

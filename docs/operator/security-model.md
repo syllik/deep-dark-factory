@@ -12,7 +12,7 @@ From [spec §4.4](../specs/2026-11-03-ddf-v1-design.md#44-boundaries):
 
 - Core never imports adapters; adapters never import each other; the daemon wires them. A CI test fails on a forbidden import.
 - Trusted code = daemon + adapters on the host. Agents run only inside containers, receive a brief and a workspace copy, and return files in `/out`. They never hold forge credentials or the review-signing key.
-- **The daemon runs only from a maintainer-promoted ref** of this repository (the production branch or a release tag), never from the integration branch. Autonomous merges into DDF's integration branch therefore take effect only after a human promotion.
+- **The daemon runs only from a maintainer-promoted ref** of this repository: a release tag (a maintainer-made tag on a `master` commit that passed CI), never the moving tip of the integration branch. Autonomous merges into DDF's integration branch therefore take effect only after a human tags a release.
 
 From [spec §8](../specs/2026-11-03-ddf-v1-design.md#8-identity-secrets-and-isolation):
 
