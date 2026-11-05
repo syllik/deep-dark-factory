@@ -2,7 +2,7 @@
 
 ## Status
 
-V1 design approved 2026-11-03; M1 docs in progress.
+V1 design approved 2026-11-03. M0 and M1 are merged; the M1 exit test is Issue #20.
 
 Design record: [docs/specs/2026-11-03-ddf-v1-design.md](../docs/specs/2026-11-03-ddf-v1-design.md). Decisions D1–D15 are logged in [decisions.md](decisions.md). The research-only gate is lifted.
 
@@ -17,7 +17,8 @@ A self-hosted factory that drives a software task from intake to a merge into th
 - GitHub is the first forge adapter, not a core dependency; GitHub Projects are never state.
 - Agent CLIs, providers and models are replaceable; roles name tiers, never models.
 - Deterministic checks before LLM calls; bounded context and bounded loops.
-- Branch roles: `dungeon-master` production, `master` staging/integration, `slave/<feature>` agent development; agent changes reach `master` through pull requests.
+- `master` is the only long-lived branch: the default, integration and release-source branch. There is no production branch; a release is a tag on an exact `master` commit that passed CI. Task branches are `<type>/issue-<number>-<slug>` from `master` and reach `master` through pull requests.
+- `master` is protected by the ruleset `master protect`: squash only, linear history, resolved review threads, required `docs-check`, no bypass actors.
 - DDF is developed by its own docs: manual mode (`docs/orchestrator/manual-mode.md`) until M5, a human merges.
 
 ## Internal naming note

@@ -5,7 +5,7 @@ Purpose: the procedure an interactive LLM session follows to run one DDF task wi
 Status: normative
 
 > **In manual mode a human merges. The session never merges, never force-pushes, and never edits a forbidden path except as [Forbidden paths](#forbidden-paths) allows.**
-> The session stops at "ready for merge" and hands the PR to the owner. It never approves its own PR, never enables auto-merge, never pushes to the integration or production branch directly.
+> The session stops at "ready for merge" and hands the PR to the owner. It never approves its own PR, never enables auto-merge, never pushes to the integration branch directly.
 
 Manual mode keeps the same lifecycle, roles, bounds and policy as the daemon ([spec §11](../specs/2026-11-03-ddf-v1-design.md#11-documentation-set-the-orchestrator-canon)); only the actors change. DDF itself is built this way until M5. This file is self-sufficient: a session that has read only `AGENTS.md` and this file can run a task. Open the linked concepts when a step points at them.
 
@@ -55,8 +55,8 @@ Validate it before using it. The repository has no validator until M2: read the 
 ### 3. Branch and worktree (`ready` → `running`)
 
 - Check dependencies (`dependsOn`) and zones: if a dependency is open or another in-flight task holds an overlapping zone, the task waits ([lifecycle.md#ready-and-waiting](../concepts/lifecycle.md#ready-and-waiting)); say so in the handoff and stop.
-- Create a worktree on a new branch from the up-to-date integration branch. DDF: `slave/<feature>` from `master`. Other projects: `change.branch` from their profile.
-- If the harness already bound this session to a worktree that starts from the up-to-date integration branch, use it: rename its branch (`git branch -m slave/<feature>`) instead of creating another. Executor subagents work in that worktree.
+- Create a worktree on a new branch from the up-to-date integration branch. DDF: `<type>/issue-<number>-<slug>` from `master` (for example `docs/issue-20-branch-model`; `<type>` is the Conventional Commits type of the change, `<slug>` a short kebab-case slug). Other projects: `change.branch` from their profile.
+- If the harness already bound this session to a worktree that starts from the up-to-date integration branch, use it: rename its branch (`git branch -m <type>/issue-<number>-<slug>`) instead of creating another. Executor subagents work in that worktree.
 
 ### 4. Executor subagents (`running`)
 
@@ -194,7 +194,7 @@ DDF has no `.ddf/project.yaml` yet. Until it does, use this profile ([spec §12]
 | **`docs`** (R1) | `docs/adapters/**`, `docs/operator/**`, `docs/project/**`, `docs/research/**`, `README.md`, `ARCHITECTURE.md`, `RESEARCH.md`; every other documentation file (`**/*.md`, e.g. `docs/glossary.md`) |
 | default | everything else (non-documentation files): the default [risk rules](../concepts/policy.md#risk-classes) (`low`, R1, or `standard`, R1 + R2, by size; `sensitive` for any default hard-stop glob: deploy, infrastructure, container files, IaC) with `lowMaxLines: 200` |
 
-**Required check:** `docs-check`; integration branch `master`, change branches `slave/<feature>`; decision log `.ai/decisions.md`. Hard stops: the [defaults](../concepts/policy.md#hard-stops) only. Paste this section as the reviewer's `--- project profile ---`.
+**Required check:** `docs-check`; integration branch `master`, change branches `<type>/issue-<number>-<slug>`; decision log `.ai/decisions.md`. Hard stops: the [defaults](../concepts/policy.md#hard-stops) only. Paste this section as the reviewer's `--- project profile ---`.
 
 ## Bounds
 
@@ -232,7 +232,7 @@ An owner answer resumes the task. It never turns this session into the merger.
 
 Stop and ask the owner. In particular, never:
 
-- merge, approve your own PR, enable auto-merge, or push to `master`/`dungeon-master` directly;
+- merge, approve your own PR, enable auto-merge, or push to `master` directly;
 - force-push, rebase, amend or rewrite published history;
 - edit a forbidden path without the owner's in-chat authorization for that exact path ([Forbidden paths](#forbidden-paths)), or touch repository settings, rulesets, secrets or other repositories;
 - lower a risk class, skip a required reviewer, reuse a review from an older head, review in this session's own context, or start a reviewer in the PR's worktree;

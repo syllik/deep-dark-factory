@@ -10,7 +10,7 @@ Rationale and full design: [spec §8](../specs/2026-11-03-ddf-v1-design.md#8-ide
 
 - Trusted code = daemon + adapters on the host.
 - Agents run only inside containers, receive a brief and a workspace copy, and return files in `/out`. They never hold forge credentials or the review-signing key.
-- The daemon runs only from a maintainer-promoted ref of DDF (the production branch or a release tag), never from the integration branch.
+- The daemon runs only from a maintainer-promoted ref of DDF: a release tag (a maintainer-made tag on a `master` commit that passed CI), never the moving tip of the integration branch.
 
 ## Host
 

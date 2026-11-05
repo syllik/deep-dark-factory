@@ -7,7 +7,7 @@
 - Deterministic verification precedes model review/correction; human merge remains the final/default authority. Sources: `AGENTS.md`, `.ai/context.md`, `ARCHITECTURE.md`, `RESEARCH.md`, Issue #1.
 - The architecture has no dependency on a local Mac/self-hosted runner or GitHub Actions product execution. Sources: `AGENTS.md`, `.ai/context.md`, `ARCHITECTURE.md`, Issue #1.
 - Context and token use stay bounded/lazy, with minimal agent calls and bounded correction loops. Sources: `AGENTS.md`, `.ai/context.md`, `ARCHITECTURE.md`, `RESEARCH.md`.
-- Branch roles are fixed: `dungeon-master` production, `master` staging/integration, `slave/<feature>` agent development. Sources: `AGENTS.md`, `.ai/context.md`.
+- Branch roles are fixed: `dungeon-master` production, `master` staging/integration, `slave/<feature>` agent development. Sources: `AGENTS.md`, `.ai/context.md`. (superseded 2026-11-05)
 - 2026-10-22 (owner decision): DDF stays a managed/active `syllik/ai-workflow` project; development follows the generated routing block in `AGENTS.md`. "Standalone" applies only to the DDF product runtime. Sources: `AGENTS.md`. (superseded 2026-11-03)
 - The project remains in research/bootstrap phase; no production engine code is created before the v0 research/migration boundary is accepted. Sources: `AGENTS.md`, `.ai/context.md`, `ARCHITECTURE.md`, `RESEARCH.md`, Issue #1. (superseded 2026-11-03)
 
@@ -54,3 +54,15 @@ Source: `docs/research/2026-11-m0-facts.md`. Format: fact → consequence → sp
 - §16.4 Both CLIs run non-interactively as non-root; isolation = Claude `--setting-sources ''` + `--strict-mcp-config`, opencode `OPENCODE_*` + `--pure`; opencode npm 1.x and GitHub 2.x incompatible → pin npm 1.x, explicit model, per-call timeout, classify errors from `is_error`/`api_error_status`/`error`; host never runs agent CLIs on a repo copy → §7.3, §8.3, §8.4, §16 → Claude Code verified; opencode verified with free models only (no provider credential available); rate-limit shapes unverified; open: `opencode-executor-output`, `opencode-reviewer-readonly` → M3 `cli-version-pin`, `agent-home-state`, `claude-config-isolation`, `opencode-config-isolation`, `*-error-shape`, `*-rate-limit-shape`, `secret-exfil-redaction`.
 - §16.5 colima as `ddf` via LaunchDaemon works, limits enforced; VM rules lost on restart, provision hooks fail silently, launchd does not restart the VM → daemon applies/verifies rules before every container start and restarts the VM; global pause only after that fails → §8.1, §8.4, §9, §16 → verified; unverified: coexistence with a second colima instance (owner's own), launchd respawn when the colima process exits, provision hooks with `sudo -n`, IPv6, host reboot (owner rerun pending) → M3 `vm-firewall-reapply`, `runtime-recovery`, `coexistence`; M5 `colima-boot`, `coexistence`.
 - §16.6 `node:sqlite` no warning on Node 24.21.0, stability 1.2 since 24.15.0 → Node ≥ 24.15.0 (documented release candidate), pinned and verified on 24.21.0; store access only via `store` → §4.4, §16 → verified (stability: documented) → none (M2 store tests).
+
+## 2026-11-05 Branch model (owner decision)
+
+Source: Issue #20 (owner decision of 2026-11-05, see #12). Supersedes the branch-roles entry above.
+
+- Single long-lived branch `master`: the default, integration and release-source branch.
+- No production branch; the production branch named in the superseded entry above is never created.
+- A release is a tag on an exact `master` commit that passed CI.
+- Task branches are `<type>/issue-<number>-<slug>` (for example `docs/issue-20-branch-model`), branched from `master` and targeting `master` by pull request.
+- 2026-11-05 AGENT-DEFAULT: Which values may `<type>` take in `<type>/issue-<number>-<slug>`? → The Conventional Commits type of the change (feat, fix, docs, refactor, test, ci, chore); `<slug>` is a short kebab-case slug. Task: #20.
+- 2026-11-05 AGENT-DEFAULT: With no production branch, what replaces "the production branch or a release tag" as the ref the daemon runs from? → A release tag (a maintainer-made tag on a `master` commit that passed CI), never the moving tip of the integration branch. Task: #20.
+- 2026-11-05 AGENT-DEFAULT: Where and how is the new branch-model decision recorded in `.ai/decisions.md`? → A new section "2026-11-05 Branch model (owner decision)" at the end of the file; the old branch-roles line gets the suffix "(superseded 2026-11-05)". Task: #20.

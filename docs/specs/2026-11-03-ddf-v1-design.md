@@ -89,7 +89,7 @@ Rules:
 
 - Core never imports adapters; adapters never import each other; the daemon wires them. A CI test fails on a forbidden import.
 - Trusted code = daemon + adapters on the host. Agents run only inside containers, receive a brief and a workspace copy, and return files in `/out`. They never hold forge credentials or the review-signing key.
-- **The daemon runs only from a maintainer-promoted ref** of this repository (the production branch or a release tag), never from the integration branch. Autonomous merges into DDF's integration branch therefore take effect only after a human promotion.
+- **The daemon runs only from a maintainer-promoted ref** of this repository: a release tag (a maintainer-made tag on a `master` commit that passed CI), never the moving tip of the integration branch. Autonomous merges into DDF's integration branch therefore take effect only after a human tags a release.
 - V1 ships as one npm package (`src/core`, `src/adapters`, `src/cli`). Split into packages only when a second consumer exists.
 - Stack: TypeScript on Node 24, pinned to 24.21.0 (`node:sqlite` needs ≥ 24.15.0, documented release candidate; verified without warning on 24.21.0), Node built-ins first (`node:sqlite`, `node:test`, `fetch`); every dependency needs a recorded reason.
 
@@ -168,6 +168,8 @@ flags (off the conveyor): needs-owner, hold, failed; global: paused (reasons: ow
 | Correction batches per change | 3 |
 | Sync batches per change | 2 |
 | Agent runs per task, all roles | 20 (`maxRunsPerTask`) |
+
+A [revision](../concepts/lifecycle.md#revision) is the initial execution or one correction batch as published by the Publisher; CI-fix pushes made within it are counted inside it.
 
 Exceeding any bound → `needs-owner`.
 
@@ -531,3 +533,5 @@ Answers, evidence and probe definitions: `docs/research/2026-11-m0-facts.md`; de
 - 2026-11-04 M0 review: §16.4 — opencode verified with free models only; open probes and full probe list (facts: docs/research/2026-11-m0-facts.md#recommended-adapter-command-lines)
 - 2026-11-04 M0 review: §16.5 — unverified items listed; `coexistence` probe (facts: docs/research/2026-11-m0-facts.md#container-limits)
 - 2026-11-04 M0 review: §7.3 — adapter checks the routed credential is present before starting a CLI; missing → credential failure, not a failed run (facts: docs/research/2026-11-m0-facts.md#agent-clis-16-item-4)
+- 2026-11-05 Issue #20: §5.3 — "revision" defined (initial execution or one correction batch, CI-fix pushes counted inside) (see docs/concepts/lifecycle.md#revision)
+- 2026-11-05 Issue #20: §4.4 — no separate release branch; the daemon runs from a release tag on `master` (owner decision 2026-11-05, see .ai/decisions.md)

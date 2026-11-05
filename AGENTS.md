@@ -34,11 +34,11 @@ Do not infer current architecture from historical conversations or other reposit
 
 ## Branch roles
 
-- `dungeon-master`: production branch.
-- `master`: staging/integration branch.
-- `slave/<feature>`: agent development branches, short kebab-case slug.
+- `master`: the only long-lived branch: default, integration and release-source branch. There is no production branch.
+- Releases: a release is a tag on an exact `master` commit that passed CI.
+- `<type>/issue-<number>-<slug>`: task branches, for example `docs/issue-20-branch-model`; `<type>` is the Conventional Commits type of the change, `<slug>` a short kebab-case slug.
 
-Agent work branches from `master` and targets `master` through a pull request unless a task says otherwise. Never merge agent work directly into `dungeon-master`.
+Agent work branches from `master` and targets `master` through a pull request unless a task says otherwise. Never push agent work directly to `master`.
 
 ## Naming note
 
