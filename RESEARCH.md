@@ -133,3 +133,7 @@ Do not start a general-purpose workflow engine, distributed scheduler, UI, GitHu
 ## Proposed v0 audit conclusion (2026-10-10)
 
 The standalone product boundary and complete capability-by-capability `KEEP/MOVE/REDESIGN/DROP/EXTERNALIZE` decision table, alternatives (Fabro, OpenHands, SWE-agent, LangGraph, Temporal), migration exclusions, selected Node 24 ESM offline stack, transactional live state requirement, backend/provider interfaces, and bounded Issue→ready PR acceptance path are recorded in [docs/controller-v0-decision.md](docs/controller-v0-decision.md). The earlier preliminary table above remains historical discovery, **not a permission to copy the legacy runner**. Status: **proposed, awaiting human acceptance of Issue #1**. No live or production implementation is claimed.
+
+## Runtime model and language (2026-11-06)
+
+Issue #31 compared runtime models (ephemeral factory per task, long-lived daemon, hybrid) and languages (TypeScript/Node, Go, Rust), with measurements: [docs/research/2026-11-runtime-and-language.md](docs/research/2026-11-runtime-and-language.md). It records the hybrid model and Go, ADRs 1 and 2 in [`.ai/decisions.md`](.ai/decisions.md).

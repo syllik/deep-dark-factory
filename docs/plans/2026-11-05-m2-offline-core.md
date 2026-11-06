@@ -4,6 +4,8 @@ Purpose: the task-by-task plan for milestone M2, the offline core that runs the 
 
 Status: proposed; accepted when the owner merges this PR
 
+> **Stack superseded (2026-11-06, Issue #31).** ADR 2 in [`.ai/decisions.md`](../../.ai/decisions.md) replaces TypeScript on Node 24 with Go. The Architecture paths, Tech Stack, Reuse, Hosted CI, Tasks 0–2 and OD-1, OD-2, OD-4, OD-11 and OD-14 are rewritten by Issue #32 before Task 1 starts. Until then, no task of this plan starts.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Subagents never commit, push or change GitHub; the orchestrator session commits, opens PRs and closes Issues. Every task runs by [manual mode](../orchestrator/manual-mode.md) and the owner merges.
 
 **Goal:** Implement the offline core of [spec §4.1](../specs/2026-11-03-ddf-v1-design.md#41-core-no-network-no-forge-no-provider) (all modules except `context`, which is M3), plus `forge-local`, `sandbox-fake`, a fake agent and the daemon wiring needed to run the whole lifecycle in tests: offline, with no network, forge or provider ([spec §14](../specs/2026-11-03-ddf-v1-design.md#14-milestones), M2 row).
