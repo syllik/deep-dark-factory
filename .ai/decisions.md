@@ -124,3 +124,17 @@ Source: Issue #31, research [`docs/research/2026-11-runtime-and-language.md`](..
   - #32 rewrites the M2 plan: Tech Stack, Reuse, CI, Tasks 0–2, the OD items, and the profile's manifest files (`go.mod`, `go.sum`, the boundary test, instead of the npm files). It also writes the code-conventions doc.
   - No M2 task starts before #32 merges.
 
+
+## 2026-11-06 M2 plan for Go (Issues #32, #37)
+
+Source: Issues #32 and #37, [M2 plan](../docs/plans/2026-11-05-m2-offline-core.md) OD-15 and OD-16. Owner's choices in the task session's chat on 2026-11-06. Accepted by the owner's merge.
+
+- Package layout (OD-15): the Go layout `internal/core/<module>`, `internal/adapters/<port>/<name>`, `internal/daemon`, `cmd/ddfd`, `cmd/ddf`; the profile, spec §4.4 and §12 globs follow it. Chosen over keeping `src/` (the research recommendation).
+- Import boundaries (OD-16): an own test in `test/boundaries/` using only the standard library (`go list -deps -json`), a `ciEntrypoint`; Go `internal/` placement where it encodes a rule. No boundary linter.
+- 2026-11-06 AGENT-DEFAULT: Where does the code-conventions doc live, and which class do its later edits get? → `docs/development/code-conventions.md`; `docs/development/**` joins the profile's `standard` agent-steering row. Task: #32.
+- 2026-11-06 AGENT-DEFAULT: How is the #37 "complete list" expressed once the rewrite is done? → The plan header note and the research #32 row state the rule (every section, task and OD that named npm, TypeScript or Node) and list the items by number; the plan header is a past-tense record. Task: #32.
+- 2026-11-06 AGENT-DEFAULT: What happens to Task 0, which #28 already executed? → Kept with its number and marked done: the first rows by #28, the Go paths by #32. Task: #32.
+- 2026-11-06 AGENT-DEFAULT: How are the two owner-decided items numbered in the plan? → New OD-15 (package layout) and OD-16 (boundary enforcement), each with an "Owner choice (2026-11-06, in chat)" line; existing OD numbers unchanged. Task: #32.
+- 2026-11-06 AGENT-DEFAULT: Is there a verify wrapper script, and how are analyzers pinned? → No wrapper script (it would be one more `ciEntrypoint`); the plan's Tech Stack defines the verify sequence once and CI mirrors it; analyzers are `tool` lines in `go.mod`. Task: #32.
+- 2026-11-06 AGENT-DEFAULT: Is `govulncheck` part of the required `verify` check? → No: a separate, non-required CI check `vulncheck`, so the required check stays deterministic. Task: #32.
+- 2026-11-06 AGENT-DEFAULT: What does the plan's Status line say after the rewrite? → "accepted 2026-11-05 (#24); Go rewrite (Issues #32, #37) accepted when the owner merges that PR". Task: #32.
