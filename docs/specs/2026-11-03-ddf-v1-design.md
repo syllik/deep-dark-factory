@@ -87,10 +87,10 @@ Rules:
 
 ### 4.4 Boundaries
 
-- Core never imports adapters; adapters never import each other; the daemon wires them. A CI test fails on a forbidden import.
+- Core never imports adapters; adapters never import each other; the daemon wires them. A CI test (`test/boundaries/`, standard library only) fails on a forbidden import.
 - Trusted code = daemon + adapters on the host. Agents run only inside containers, receive a brief and a workspace copy, and return files in `/out`. They never hold forge credentials or the review-signing key.
 - **The daemon runs only from a maintainer-promoted ref** of this repository: a release tag (a maintainer-made tag on a `master` commit that passed CI), never the moving tip of the integration branch. Autonomous merges into DDF's integration branch therefore take effect only after a human tags a release.
-- V1 ships as one Go module (`src/core`, `src/adapters`, `src/cli`; layout per the M2 plan) built into static binaries (`ddfd`, `ddf`) for linux and darwin on arm64 and amd64. Split only when a second consumer exists.
+- V1 ships as one Go module (`internal/core`, `internal/adapters`, `internal/daemon`, `cmd/ddfd`, `cmd/ddf`; layout per the M2 plan) built into static binaries (`ddfd`, `ddf`) for linux and darwin on arm64 and amd64. Split only when a second consumer exists.
 - Stack: Go, toolchain pinned in `go.mod`, `CGO_ENABLED=0`; standard library first; an exhaustiveness analyzer for enum-like types runs as a required CI step; every dependency needs a recorded reason. Rationale and measurements: `docs/research/2026-11-runtime-and-language.md`; decision: `.ai/decisions.md` ADR 2 (2026-11-06).
 - Runtime model: hybrid. One long-lived control plane per host (`ddfd`, the store, the secrets) and a disposable per-task execution side (run containers, workspace copies) that is torn down when the task leaves the conveyor. Decision: `.ai/decisions.md` ADR 1 (2026-11-06); teardown rules in Issue #33.
 
@@ -434,7 +434,7 @@ templates/project/  .ddf/project.yaml, issue forms (task, request, bug), AGENTS.
 
 ## 12. DDF's own profile
 
-DDF is a pilot of itself (D1). Its profile marks every security-relevant area as `sensitive` (R1 + R2, R2 at `deep`): `src/core/policy/**`, `src/core/lifecycle/**`, `src/core/workspace/**` (hook neutralisation, patch apply), the Publisher (sanitizer, path checks), the token broker, the review-signature code, `src/adapters/agent-*/**` (settings isolation, read-only tools), `src/adapters/sandbox-*/**` (firewall), the merge code in `src/adapters/forge-*/**`, `prompts/**` and `schemas/**`. Combined with §4.4 (the daemon runs only from a maintainer-promoted ref), an autonomously merged change to DDF cannot alter the running factory until a human promotes it.
+DDF is a pilot of itself (D1). Its profile marks every security-relevant area as `sensitive` (R1 + R2, R2 at `deep`): `internal/core/policy/**`, `internal/core/lifecycle/**`, `internal/core/workspace/**` (hook neutralisation, patch apply), `internal/core/store/migrations/**`, `internal/daemon/**` (it drives the gate, the merge and the intents), the Publisher `internal/core/publisher/**` (sanitizer, path checks), the token broker, the review-signature code, `internal/adapters/agent/**` (settings isolation, read-only tools), `internal/adapters/sandbox/**` (firewall), the merge code in `internal/adapters/forge/**`, `prompts/**`, `schemas/**` and every forbidden path. Its `ciEntrypoints` are `scripts/docs-check.mjs` and, when they exist, `go.mod`, `go.sum` and `test/boundaries/**`. Until DDF has its own project file, the working copy of this profile is in [manual mode](../orchestrator/manual-mode.md#ddfs-own-profile-until-ddfprojectyaml-exists). Combined with §4.4 (the daemon runs only from a maintainer-promoted ref), an autonomously merged change to DDF cannot alter the running factory until a human promotes it.
 
 ## 13. Migration
 
@@ -545,3 +545,5 @@ Answers, evidence and probe definitions: `docs/research/2026-11-m0-facts.md`; de
 - 2026-11-05 Issue #22: §6.7 — `change.branch` placeholders `{type}`, `{n}`, `{slug}` defined (see docs/project/project-yaml-reference.md#change)
 - 2026-11-06 Issue #31: §4.1, §4.4 — stack changed from TypeScript on Node 24 to Go (static binaries, cgo-free SQLite driver); §16 item 6 stays as a historical answer (see docs/research/2026-11-runtime-and-language.md, .ai/decisions.md ADR 2)
 - 2026-11-06 Issue #31: §4.4 — runtime model recorded as hybrid: long-lived control plane, disposable per-task execution side; follow-ups #33, #34, #35 (see docs/research/2026-11-runtime-and-language.md, .ai/decisions.md ADR 1)
+- 2026-11-06 Issue #32: §4.4 — Go layout `internal/` + `cmd/` and a standard-library boundary test (owner choices, see docs/plans/2026-11-05-m2-offline-core.md OD-15, OD-16)
+- 2026-11-06 Issue #32: §12 — Go paths; aligned with the manual-mode profile: migrations, daemon and Publisher globs and the `ciEntrypoints` added (closes #30; see docs/orchestrator/manual-mode.md#ddfs-own-profile-until-ddfprojectyaml-exists)
