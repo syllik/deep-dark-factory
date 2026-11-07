@@ -32,7 +32,8 @@ The supervisor session is an operator console, not a worker ([spec §11](../spec
 2. For each `needs-owner` task: `ddf show <task>`, identify the category ([below](#unblocking-needs-owner)), summarize it to the owner in one line with the option(s).
 3. Relay the owner's decision with `ddf answer`, or leave the task flagged.
 4. Submit new requests the owner gives with `ddf ask`.
-5. End with a [handoff](handoff.md) comment.
+5. After each pass, check the [context budget](handoff.md#context-budget); past a limit, hand off as it says.
+6. End with a [handoff](handoff.md) comment.
 
 ## Unblocking `needs-owner`
 
