@@ -53,7 +53,7 @@ Sources of the context size, in order:
 1. **Status line** (documented): its stdin JSON carries `session_id` and `context_window.total_input_tokens`, the input + cache-write + cache-read tokens of the latest API response. The status line runs only in the terminal UI, and only if configured.
 2. **Transcript** (fallback, observed and not documented): the latest entry of the session transcript with `type: "assistant"`, `isSidechain` not `true` and a `message.usage` object; the size is `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`. The transcript is written asynchronously and can lag one turn.
 
-The hook runs on `UserPromptSubmit` (every prompt past a limit) and `PostToolUse` (once per limit crossed) and only adds context through `hookSpecificOutput.additionalContext`. It never blocks, and on any error it exits 0 silently. Limits: `DDF_CONTEXT_SOFT` and `DDF_CONTEXT_HARD` (defaults 120000 and 160000).
+The hook runs on `UserPromptSubmit` (every prompt past a limit) and `PostToolUse` (once per limit crossed) and only adds context through `hookSpecificOutput.additionalContext`. Hook events from subagents (the input carries `agent_id`) are ignored: they neither receive the warning nor count as warned for the main session. State is kept in a per-user directory, `$XDG_RUNTIME_DIR/ddf-context-budget` or else `~/.cache/ddf-context-budget`; the script uses it only if it is a real directory (not a symlink) owned by the current user with no group or other permissions, and replaces state files by writing a new file and renaming it, so it never writes through a symlink. It never blocks, and on any error it exits 0 silently. Limits: `DDF_CONTEXT_SOFT` and `DDF_CONTEXT_HARD` (defaults 120000 and 160000).
 
 Save as `ddf-context-budget.mjs` (Node 18 or later):
 
@@ -61,13 +61,17 @@ Save as `ddf-context-budget.mjs` (Node 18 or later):
 #!/usr/bin/env node
 // DDF context budget for interactive Claude Code sessions.
 // `statusline` mode records the live context size; `hook` mode warns past the limits.
-import { readFileSync, writeFileSync, mkdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, statSync, lstatSync, renameSync, unlinkSync, openSync, readSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 
 const SOFT = Number(process.env.DDF_CONTEXT_SOFT) || 120000;
 const HARD = Number(process.env.DDF_CONTEXT_HARD) || 160000;
-const STATE = join(tmpdir(), 'ddf-context-budget');
+// Per-user state directory, never the shared temp directory.
+const STATE = process.env.XDG_RUNTIME_DIR
+  ? join(process.env.XDG_RUNTIME_DIR, 'ddf-context-budget')
+  : join(homedir(), '.cache', 'ddf-context-budget');
 const FRESH_MS = 10 * 60 * 1000;
 
 let input = {};
@@ -75,6 +79,26 @@ try { input = JSON.parse(readFileSync(0, 'utf8')); } catch { process.exit(0); }
 const id = String(input.session_id ?? '').replace(/[^A-Za-z0-9_-]/g, '');
 const file = (ext) => join(STATE, `${id}.${ext}`);
 const k = (n) => `${Math.round(n / 1000)}k`;
+
+// Use STATE only if it is a real directory, owned by this user, with no group/other access.
+function stateIsPrivate() {
+  mkdirSync(STATE, { recursive: true, mode: 0o700 });
+  const s = lstatSync(STATE);
+  if (!s.isDirectory()) return false;
+  if (typeof process.getuid === 'function' && s.uid !== process.getuid()) return false;
+  return (s.mode & 0o077) === 0;
+}
+
+// Write a fresh file ('wx' fails on any existing path, symlinks included), then rename it into place.
+function put(ext, value) {
+  const tmp = join(STATE, `${id}.${ext}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(tmp, value, { flag: 'wx', mode: 0o600 });
+    renameSync(tmp, file(ext));
+  } catch {
+    try { unlinkSync(tmp); } catch {}
+  }
+}
 
 function fromStatusLine() {
   try {
@@ -106,22 +130,23 @@ function fromTranscript(path) {
 
 try {
   if (!id) process.exit(0);
-  mkdirSync(STATE, { recursive: true, mode: 0o700 });
+  if (!stateIsPrivate()) process.exit(0);
 
   if (process.argv[2] === 'statusline') {
     const tokens = input.context_window?.total_input_tokens;
-    if (Number.isFinite(tokens)) writeFileSync(file('tokens'), String(tokens));
+    if (Number.isFinite(tokens)) put('tokens', String(tokens));
     const mark = tokens >= HARD ? ' HARD' : tokens >= SOFT ? ' soft' : '';
     process.stdout.write(Number.isFinite(tokens) ? `ctx ${k(tokens)}${mark}` : 'ctx -');
     process.exit(0);
   }
 
+  if (input.agent_id) process.exit(0); // subagent event: no warning, no warned state
   const tokens = fromStatusLine() ?? fromTranscript(input.transcript_path);
   if (!tokens) process.exit(0);
   const level = tokens >= HARD ? 2 : tokens >= SOFT ? 1 : 0;
   let warned = 0;
   try { warned = Number(readFileSync(file('warned'), 'utf8')) || 0; } catch {}
-  writeFileSync(file('warned'), String(level));
+  put('warned', String(level));
   const event = input.hook_event_name;
   if (level === 0 || (event === 'PostToolUse' && level <= warned)) process.exit(0);
 
@@ -145,4 +170,4 @@ Settings snippet for the operator's user settings (replace the path; keep an exi
 }
 ```
 
-Facts used: the Claude Code [hooks](https://code.claude.com/docs/en/hooks) page (common input fields, `additionalContext`, exit 0 never blocks) and the [status line](https://code.claude.com/docs/en/statusline) page (`session_id`, `context_window.total_input_tokens`). The transcript entry shape is observed, not documented: if it changes, the fallback returns nothing and the hook stays silent.
+Facts used: the Claude Code [hooks](https://code.claude.com/docs/en/hooks) page (common input fields, `agent_id` on events fired inside a subagent, `additionalContext`, exit 0 never blocks) and the [status line](https://code.claude.com/docs/en/statusline) page (`session_id`, `context_window.total_input_tokens`). The transcript entry shape is observed, not documented: if it changes, the fallback returns nothing and the hook stays silent.
