@@ -220,6 +220,8 @@ Same bounds as the daemon ([lifecycle.md#bounds](../concepts/lifecycle.md#bounds
 
 Exceeding any bound → `needs-owner`.
 
+The session's own context has a budget too: check it at each checkpoint and rotate as [handoff.md#context-budget](handoff.md#context-budget) says. It is not a task bound and never leads to `needs-owner`.
+
 ## What goes to the owner
 
 `needs-owner` in manual mode: post one comment on the task Issue with the category and a one-line question, add the `needs-owner` label if the repository has it, post a [handoff](handoff.md), and stop that task.
