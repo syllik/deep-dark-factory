@@ -138,3 +138,7 @@ Source: Issues #32 and #37, [M2 plan](../docs/plans/2026-11-05-m2-offline-core.m
 - 2026-11-06 AGENT-DEFAULT: Is there a verify wrapper script, and how are analyzers pinned? → No wrapper script (it would be one more `ciEntrypoint`); the plan's Tech Stack defines the verify sequence once and CI mirrors it; analyzers are `tool` lines in `go.mod`. Task: #32.
 - 2026-11-06 AGENT-DEFAULT: Is `govulncheck` part of the required `verify` check? → No: a separate, non-required CI check `vulncheck`, so the required check stays deterministic. Task: #32.
 - 2026-11-06 AGENT-DEFAULT: What does the plan's Status line say after the rewrite? → "accepted 2026-11-05 (#24); Go rewrite (Issues #32, #37) accepted when the owner merges that PR". Task: #32.
+
+## 2026-11-07 Context budget for interactive sessions (Issue #40)
+
+- 2026-11-07 Interactive sessions rotate on a measured context budget (soft 120000, hard 160000 tokens by default, operator-chosen), measured by a deterministic hook rather than the model's own estimate; daemon runs are unaffected. Rules: `docs/orchestrator/handoff.md#context-budget`; hook recipe: `docs/adapters/agent-claude-code.md#interactive-sessions`. Task: #40.
