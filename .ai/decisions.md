@@ -124,3 +124,7 @@ Source: Issue #31, research [`docs/research/2026-11-runtime-and-language.md`](..
   - #32 rewrites the M2 plan: Tech Stack, Reuse, CI, Tasks 0–2, the OD items, and the profile's manifest files (`go.mod`, `go.sum`, the boundary test, instead of the npm files). It also writes the code-conventions doc.
   - No M2 task starts before #32 merges.
 
+
+## 2026-11-07 Context budget for interactive sessions (Issue #40)
+
+- 2026-11-07 Interactive sessions rotate on a measured context budget (soft 120000, hard 160000 tokens by default, operator-chosen), measured by a deterministic hook rather than the model's own estimate; daemon runs are unaffected. Rules: `docs/orchestrator/handoff.md#context-budget`; hook recipe: `docs/adapters/agent-claude-code.md#interactive-sessions`. Task: #40.
