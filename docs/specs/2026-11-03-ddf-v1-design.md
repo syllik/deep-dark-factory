@@ -65,9 +65,9 @@ Rules:
 | `model` | Types and versioned schemas: Task, Run, Change, Review, Finding, Question, Decision. Schema IDs `ddf.<name>/v1`. |
 | `store` | SQLite (embedded, through a cgo-free driver; §4.4) as the canonical state; append-only event journal; run leases; intents. |
 | `lifecycle` | Pure transition functions for the task state machine (§5). |
-| `scheduler` | Run slots, zones, dependencies, priority order, global pause (a set of reasons, §9). |
+| `scheduler` | Admits runs against the host capacity (CPU, memory, disk) reported by the Sandbox port, with an operator override (§7.2); per-run limits come from the sizing rule (Issue #34). Zones, dependencies, priority order, global pause (a set of reasons, §9). |
 | `policy` | Risk classification, reviewer set, blocking rules, path policy, hard-stop detection, `evaluateMerge` (§6). Pure functions. |
-| `workspace` | Daemon-owned clean clones, per-run copies, patch export/apply, patch-id. Never executes repository content on the host (§8.3). |
+| `workspace` | Daemon-owned clean clones, per-run copies handed to the Sandbox port as content (never as a host path), patch export/apply, patch-id. Never executes repository content on the host (§8.3). |
 | `context` | Builds bounded per-role briefs from the task spec, the project profile, `AGENTS.md` and referenced files, all read from the integration branch. |
 
 ### 4.2 Ports and V1 adapters
@@ -76,7 +76,7 @@ Rules:
 |---|---|---|
 | Forge | `forge-local`, `forge-github` | list candidate tasks; read intake actor; create task (with task-key marker); find change by task key; publish change; update change body; update branch from base; read checks for a head; rerun checks; post review; read answers and their authors; merge pinned to a head SHA; revert; close/reopen task; set projection labels. Every write supports **dry-run** (logged, not performed). |
 | Agent | `agent-claude-code`, `agent-opencode` | `run(role, brief, workspace, limits) → result` validated against the role schema (§7.3) |
-| Sandbox | `sandbox-docker` (container runtime per runtime profile, §8.1), `sandbox-fake` | create/run/kill a container with mounts, limits and network rules |
+| Sandbox | `sandbox-docker` (container runtime per runtime profile, §8.1), `sandbox-fake` | create a run cell (container plus any volume or network it needs) labelled with task key and run ID, with limits and network rules; put content in (brief, role bundle, workspace copy); run; get files out (`result.json`, `change.patch`); kill; list resources by label (task key, run ID); destroy by task key, then verify by listing that nothing with that key remains; report host capacity (CPU, memory, disk). No operation takes a host path; how content moves is the adapter's matter (§8.3). An unverifiable teardown is a reported failure (journal + notification), never silent. |
 | Notify | `notify-cli`; `notify-telegram` deferred to V1.1 | send event; receive owner answers and commands with sender identity |
 | Secrets | `secrets-file` | read a named secret |
 
@@ -91,8 +91,8 @@ Rules:
 - Trusted code = daemon + adapters on the host. Agents run only inside containers, receive a brief and a workspace copy, and return files in `/out`. They never hold forge credentials or the review-signing key.
 - **The daemon runs only from a maintainer-promoted ref** of this repository: a release tag (a maintainer-made tag on a `master` commit that passed CI), never the moving tip of the integration branch. Autonomous merges into DDF's integration branch therefore take effect only after a human tags a release.
 - V1 ships as one Go module (`internal/core`, `internal/adapters`, `internal/daemon`, `cmd/ddfd`, `cmd/ddf`; layout per the M2 plan) built into static binaries (`ddfd`, `ddf`) for linux and darwin on arm64 and amd64. Split only when a second consumer exists.
-- Stack: Go, toolchain pinned in `go.mod`, `CGO_ENABLED=0`; standard library first; an exhaustiveness analyzer for enum-like types runs as a required CI step; every dependency needs a recorded reason. Rationale and measurements: `docs/research/2026-11-runtime-and-language.md`; decision: `.ai/decisions.md` ADR 2 (2026-11-06).
-- Runtime model: hybrid. One long-lived control plane per host (`ddfd`, the store, the secrets) and a disposable per-task execution side (run containers, workspace copies) that is torn down when the task leaves the conveyor. Decision: `.ai/decisions.md` ADR 1 (2026-11-06); teardown rules in Issue #33.
+- Stack: Go, toolchain pinned in `go.mod`, `CGO_ENABLED=0`; standard library first; an exhaustiveness analyzer for enum-like types runs as a required CI step; every dependency needs a recorded reason. Rationale and measurements: `docs/research/2026-11-runtime-and-language.md`; decision: `.ai/decisions.md` ADR 2 (2026-11-06). `internal/core/workspace` runs the `git` binary, so the control-plane image carries `git` (ADR 2 amendment, 2026-11-10).
+- Runtime model: hybrid. One long-lived control plane per host (`ddfd`, the store, the secrets) and a disposable per-task execution side (run containers, workspace copies) that is torn down when the task leaves the conveyor. Decision: `.ai/decisions.md` ADR 1 (2026-11-06); teardown record §4.5, recovery §9; full task-cell rules in Issue #33.
 
 ### 4.5 Store and intents
 
@@ -102,6 +102,7 @@ Tables (indicative): `tasks`, `runs`, `changes`, `reviews`, `findings`, `questio
 - Every forge object DDF creates carries a hidden task-key marker (`ddf:task-key=<key>`), so reconciliation finds it by key, not by branch name or title.
 - **Model runs are not intents.** A run interrupted by a restart is discarded and retried within the task's run budget (§5.3).
 - Task key: a digest of `{forge, repository, source kind, source id}`; every store row, lease and signature is scoped by it.
+- **Teardown record.** Per task, the store records that its run cell was destroyed and verified (Sandbox port, §4.2), with the time (indicative: a column on `tasks` or a `teardowns` row; decided in M2). Recovery (§9) writes the same record.
 
 ## 5. Task lifecycle
 
@@ -300,11 +301,12 @@ tiers:
 roles:
   r2: {prefer: [{adapter: opencode, model: <other-provider/model>}]}   # optional
 limits:
-  maxConcurrentContainers: 2     # every container counts: Executor, each reviewer, local gate, forge-local CI
+  # capacity: operator override of the host capacity reported by the Sandbox port; key and schema land with Issue #34
+  # maxConcurrentContainers: 2   # optional operator cap, no default; every container counts: Executor, each reviewer, local gate, forge-local CI
   maxSubagentsPerRun: 3          # advisory, passed to the agent; not enforceable by the CLIs
 ```
 
-Entries are tried in order. A rate-limited entry is marked cooling until its reset time; the next entry of the tier is used; with no entry left the task waits and one notification is sent. Container limits must fit the resources of the container runtime; `ddf status` reports a misfit.
+Entries are tried in order. A rate-limited entry is marked cooling until its reset time; the next entry of the tier is used; with no entry left the task waits and one notification is sent. The scheduler admits runs against the host capacity (CPU, memory, disk) reported by the Sandbox port; an operator setting in `limits` overrides the reported values (its key and schema land with the sizing rule, Issue #34). Per-run limits come from that sizing rule. `limits.maxConcurrentContainers` is an optional operator cap, not the scheduling input. Container limits must fit the resources of the container runtime; `ddf status` reports a misfit.
 
 ### 7.3 Agent adapter contract
 
@@ -345,14 +347,14 @@ The token broker mints an installation token per operation, narrowed to one repo
 ### 8.3 Workspaces and publication
 
 - Daemon clones live in `~ddf/work/<forge>/<owner>/<repo>`, used only by trusted code, with hooks disabled (`core.hooksPath` to an empty directory, no fsmonitor, no filter drivers).
-- Each run gets a fresh copy (its own `.git`, no remotes, no credentials) that exists only inside the container.
+- Each run gets a fresh copy (its own `.git`, no remotes, no credentials). The copy is per run: never shared with the host's working files or another run, reachable only by that run's container, and destroyed with the run cell; it is never a bind mount of a control-plane or host path. The Sandbox port takes it in as content and returns files out (§4.2); how the adapter moves it (an archive stream, or a per-run volume the control plane fills) is the adapter's matter. Read-only for the Planner and reviewers, writable for the Executor; the local gate and `forge-local` CI get the applied tree as content the same way.
 - After the Executor finishes, the adapter's trusted wrapper (not the agent) runs `git add -A && git diff --cached --binary <base>` in the container and writes `/out/change.patch`. The Publisher applies it to the daemon's clean clone with hooks and config neutralised, refuses symlinks, paths outside the repository and any path under `.git/`, and evaluates path policy on the applied tree.
 - **The host never executes repository content.** Verify, the local gate and `forge-local` CI always run in fresh containers. The local gate runs on the applied tree **before** the commit is pushed, so a failing gate produces no forge write. The host never runs an agent CLI against a repository copy, not even `opencode models` or `opencode debug`: opencode loads project plugins on every invocation.
 - The Publisher refuses a patch that adds a `.opencode/` or `.claude/` path (already forbidden by §6.5) or any `node_modules/` path unless the project profile allows it: failed run, with the reason in the journal.
 
 ### 8.4 Containers
 
-- One per run; base image from `images/` or the project's `image`; fresh, empty home; default limits 3 GB RAM, 2 CPU, pids limit.
+- One per run, labelled with task key and run ID (§4.2); base image from `images/` or the project's `image`; fresh, empty home; memory and pids limits per run from the sizing rule (Issue #34), admitted against host capacity (§7.2).
 - **Isolation properties.** Every run container has: no route to the host, the control plane or private address ranges (DNS excepted); all capabilities dropped; no new privileges; a non-root user; pids and memory limits; no container runtime socket. One probe set checks them (§14.1 probe 6). Each runtime profile says how it provides them and must pass the same probes.
 - **Pause reason for isolation rules** (every profile). Each runtime profile defines a runtime instance identifier (for example a boot or daemon start identifier). Each time the daemon applies the isolation rules it records that identifier and a fingerprint of the applied rules; this is the "unchanged" baseline. Before every container start the daemon reads the current identifier, checks the rules against the fingerprint and runs the probes. A changed identifier is an observed runtime restart; a fingerprint mismatch with the same identifier is tampering. Precedence:
   1. Rules absent or changed (fingerprint mismatch) while no runtime restart was observed (same identifier) → tamper signal: global pause with reason `security` (§9), no automatic lift, even when a re-apply would succeed; a silent re-apply does not clear it.
@@ -385,7 +387,7 @@ Agent code runs in the project's CI. A project may be set to `merge-integration`
 
 **Tick:** every 60 s; forge polling with conditional requests (ETag). No webhooks in V1.
 
-**Recovery:** on start the daemon takes the instance lock, kills containers from a previous instance, discards their runs (retried within budget), and reconciles every unresolved forge intent by task-key marker (e.g. a change for the task already exists → adopt it). Unreconcilable intents → `needs-owner`; never a blind retry of a forge write.
+**Recovery:** on start the daemon takes the instance lock and lists execution resources by label (Sandbox port, §4.2). Per task key and run ID from the labels: resources whose task is terminal or unknown to the store are destroyed and verified, and the teardown recorded (§4.5); resources of a non-terminal task are, in V1, killed and their run discarded (retried within budget). Re-adopting live runs later changes only that branch, not the port. An unverifiable teardown is reported (journal + notification). The daemon then reconciles every unresolved forge intent by task-key marker (e.g. a change for the task already exists → adopt it). Unreconcilable intents → `needs-owner`; never a blind retry of a forge write.
 
 | Failure | Reaction |
 |---|---|
@@ -567,3 +569,11 @@ Answers, evidence and probe definitions: `docs/research/2026-11-m0-facts.md`; de
 - 2026-11-10 Issue #45: §9 — pause reasons `runtime` and `security` defined by isolation-rule properties; host sleep row profile-neutral
 - 2026-11-10 Issue #45: §14, §14.1 — M3 isolation rules; M5 on a small always-on arm64 Linux host, probes in a 1 vCPU, 1–2 GB Linux arm64 VM; probe 6 names the properties and links the single list; `needs-owner` round trip via the CLI
 - 2026-11-10 Issue #45: §15, §16 — IPv6 line names the isolation probe; §16 item 5 scoped to the macOS colima profile
+- 2026-11-10 Issue #46: §4.1 — scheduler admits runs against host capacity reported by the Sandbox port with an operator override, per-run limits from Issue #34; workspace hands per-run copies to the port as content
+- 2026-11-10 Issue #46: §4.2 — Sandbox port operations: labelled run cell, content in, run, files out, kill, list by label, destroy by task key and verify, report capacity; no host path arguments
+- 2026-11-10 Issue #46: §4.4 — control-plane image carries `git` (ADR 2 amendment); runtime-model bullet points to the teardown record and recovery
+- 2026-11-10 Issue #46: §4.5 — per-task teardown record (destroyed, verified, time), indicative
+- 2026-11-10 Issue #46: §7.2 — fixed `maxConcurrentContainers: 2` replaced by host capacity with operator override; `maxConcurrentContainers` an optional cap
+- 2026-11-10 Issue #46: §8.3 — per-run copy rule reconciled: never shared, never a host or control-plane bind mount, transport is the adapter's matter
+- 2026-11-10 Issue #46: §8.4 — containers labelled with task key and run ID; fixed 3 GB RAM, 2 CPU defaults removed, limits from the sizing rule (Issue #34)
+- 2026-11-10 Issue #46: §9 — single recovery rule by label: terminal or unknown task → destroy, verify, record; non-terminal → V1 kill and discard

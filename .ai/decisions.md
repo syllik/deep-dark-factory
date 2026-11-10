@@ -123,6 +123,10 @@ Source: Issue #31, research [`docs/research/2026-11-runtime-and-language.md`](..
   - Spec §4.1 `store` and the §4.4 package and stack bullets change in this PR, with Changelog lines.
   - #32 rewrites the M2 plan: Tech Stack, Reuse, CI, Tasks 0–2, the OD items, and the profile's manifest files (`go.mod`, `go.sum`, the boundary test, instead of the npm files). It also writes the code-conventions doc.
   - No M2 task starts before #32 merges.
+- 2026-11-10 Amendment (Issue #46): `internal/core/workspace` runs the `git` binary, so the control-plane image carries `git`; the "distroless static" base in the Pros bullet above does not hold as written (the base must provide `git`). The original bullet stays as approved on 2026-11-06. Spec [§4.4](../docs/specs/2026-11-03-ddf-v1-design.md#44-boundaries). Task: #46.
+- 2026-11-10 AGENT-DEFAULT: What is the operator override for capacity and what happens to limits.maxConcurrentContainers? → Docs name the override as an operator setting in routing config `limits` that replaces the port-reported values; its exact key and schema land with #34 with the sizing rule. `limits.maxConcurrentContainers` stays optional with no default, documented as an optional operator cap, not the scheduling input; schemas/routing.json is not edited here. Task: #46.
+- 2026-11-10 AGENT-DEFAULT: Where is the teardown record stored? → Indicative only, in line with §4.5 'Tables (indicative)': a per-task record (destroyed, verified, time) scoped by task key; the concrete table/column is decided in M2. Task: #46.
+- 2026-11-10 AGENT-DEFAULT: What does recovery do with live runs of a non-terminal task in V1? → Kill and discard (retried within budget), as now; the rule is keyed by task key and run ID from labels so the re-adoption task (decision 5b) changes only that branch. Task: #46.
 
 
 ## 2026-11-06 M2 plan for Go (Issues #32, #37)
