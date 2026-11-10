@@ -161,8 +161,8 @@ Gate refusals map to transitions ([spec §5.2](../specs/2026-11-03-ddf-v1-design
 | `owner` | `ddf pause`, Telegram `/pause` | `ddf resume` / `/resume` |
 | `credential` | agent authentication failure ([routing.md](routing.md#agent-adapter-contract)) | `ddf resume` / `/resume` |
 | `revert-red` | second DDF-attributed red within 24 h ([revert](#revert)) | `ddf resume` / `/resume` |
-| `runtime` | container runtime unavailable after the daemon's own VM restart and firewall re-apply failed | automatically, with a notification, once health check, firewall check and probe pass again |
-| `security` | VM firewall rules missing while no VM restart was observed | `ddf resume` / `/resume` |
+| `runtime` | container runtime unavailable: the daemon's own runtime restart failed, or isolation rules absent or unverifiable after one re-apply | automatically, with a notification, once health check, isolation-rule check and probes pass again |
+| `security` | isolation rules changed without a runtime restart | `ddf resume` / `/resume` |
 
 Rationale: [spec §9](../specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery), [spec §8.4](../specs/2026-11-03-ddf-v1-design.md#84-containers).
 
@@ -170,7 +170,7 @@ Rationale: [spec §9](../specs/2026-11-03-ddf-v1-design.md#9-notifications-failu
 
 - **Store:** the canonical state (SQLite), with an append-only event journal; tables (indicative) `tasks`, `runs`, `changes`, `reviews`, `findings`, `questions`, `intents`, `leases`, `events`. Every store row, lease and signature is scoped by the task key, a digest of `{forge, repository, source kind, source id}`.
 - **Intent:** every forge write (create task, push, open/update change, post review, update branch, merge, revert, close/reopen task) writes an intent before the call and its outcome after. Every forge object DDF creates carries a hidden task-key marker (`ddf:task-key=<key>`). Model runs are not intents.
-- **Lease:** a run lease held in the store, scoped by task key. After host sleep launchd restarts the daemon (never the VM) and expired leases are released.
+- **Lease:** a run lease held in the store, scoped by task key. After host sleep the daemon's supervisor restarts it and expired leases are released.
 - **Recovery:** on start the daemon takes the instance lock, kills containers from a previous instance, discards their runs (retried within the run budget), and reconciles every unresolved intent by task-key marker (for example, a change for the task already exists → adopt it). Unreconcilable intents → `needs-owner`; never a blind retry of a forge write.
 
 Rationale: [spec §4.5](../specs/2026-11-03-ddf-v1-design.md#45-store-and-intents), [spec §9](../specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery), [spec §4.1](../specs/2026-11-03-ddf-v1-design.md#41-core-no-network-no-forge-no-provider).

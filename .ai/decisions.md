@@ -142,3 +142,13 @@ Source: Issues #32 and #37, [M2 plan](../docs/plans/2026-11-05-m2-offline-core.m
 ## 2026-11-07 Context budget for interactive sessions (Issue #40)
 
 - 2026-11-07 Interactive sessions rotate on a measured context budget (soft 120000, hard 160000 tokens by default, operator-chosen), measured by a deterministic hook rather than the model's own estimate; daemon runs are unaffected. Rules: `docs/orchestrator/handoff.md#context-budget`; hook recipe: `docs/adapters/agent-claude-code.md#interactive-sessions`. Task: #40.
+
+## 2026-11-10 Reference host and runtime profiles (Issue #45)
+
+Source: Issue #45, owner decisions of #43. Amends D2, D9 and D10 above; the original lines stay as approved on 2026-11-03.
+
+- 2026-11-10 D2 amended: V1 reference deployment is a Linux host with the control plane (`ddfd`) in a container ("Linux container profile"); macOS + colima is the second runtime profile ("macOS colima profile"); rootful or rootless runtime on Linux stays open until the probe spike. Spec §2, §8.1. Task: #45.
+- 2026-11-10 D10 amended: run-container isolation is a set of properties (no route to the host, the control plane or private address ranges, DNS excepted; all capabilities dropped; no new privileges; non-root user; pids and memory limits; no runtime socket) that every runtime profile provides and proves with one shared probe set. Spec §2, §8.4, §14.1 probe 6. Task: #45.
+- 2026-11-10 D9 amended: Telegram deferred to V1.1; the Notify port and the CLI stay. Spec §2, §4.2, §14, §14.1. Task: #45.
+- 2026-11-10 AGENT-DEFAULT: Where does the single list of isolation probes live? → `docs/operator/security-model.md` Probes holds the list; spec §14.1 probe 6 names the properties and links to it. Task: #45.
+- 2026-11-10 AGENT-DEFAULT: What are the two runtime profiles called? → "Linux container profile" (reference) and "macOS colima profile". Task: #45.
