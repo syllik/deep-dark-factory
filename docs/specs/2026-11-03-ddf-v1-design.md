@@ -26,15 +26,15 @@ V1 is done when one operator runs DDF on one host and two pilot projects (DDF it
 | # | Decision |
 |---|---|
 | D1 | V1 autonomous merge into the integration branch only for DDF itself and one private pilot product. Every other project starts at `propose` (human merge). |
-| D2 | V1 host: a macOS workstation under a separate non-admin user; later a server. The core is host-independent. |
+| D2 | V1 reference deployment: a Linux host with the control plane (`ddfd`) in a container ("Linux container profile"); macOS + colima under a separate non-admin user is the second runtime profile ("macOS colima profile"). The core is host-independent (amended 2026-11-10, #45). |
 | D3 | Agent adapters in V1: Claude Code CLI and opencode CLI. |
 | D4 | Agent roles: Planner, Executor, Reviewer-correctness (R1), Reviewer-security (R2). Trusted non-AI roles: Publisher, Merge-gate. The daemon is the orchestrator. |
 | D5 | Reviewer count is a policy outcome of the risk class (1 or 2), never a hard-coded constant. |
 | D6 | Three GitHub Apps: `worker`, `review-correctness`, `review-security`. Fallback if GitHub does not count App approvals: machine users (subject to GitHub terms, §16). |
 | D7 | Two intake modes: free-form request (Planner creates the tasks) and an existing task marked for DDF. |
 | D8 | No GitHub Projects board in the core. DDF must work on a plain Git remote. |
-| D9 | Operator channel: CLI and Telegram. |
-| D10 | Isolation: one container per run (colima on macOS), no forge credentials inside. |
+| D9 | Operator channel: CLI; Telegram deferred to V1.1. The Notify port and the CLI stay (amended 2026-11-10, #45). |
+| D10 | Isolation: one container per run, no forge credentials inside. Run-container isolation is a set of properties (§8.4) that every runtime profile provides and proves with one shared probe set (§14.1 probe 6) (amended 2026-11-10, #45). |
 | D11 | Operator config lives in a private per-operator repository or folder; secrets never in Git. |
 | D12 | The old personal workflow repository is archived after migration; DDF `docs/` becomes the single canon for autonomous and interactive (manual) orchestration. |
 | D13 | Local workspace cleanup is a separate track before the pilot. |
@@ -48,7 +48,7 @@ V1 is done when one operator runs DDF on one host and two pilot projects (DDF it
 | Product | this repository | DDF maintainers | defaults, role prompts, schemas, templates |
 | Operator | a private repo or folder chosen by the operator (`ddf setup` scaffolds it) | the person running DDF | `routing.yaml`, `projects.yaml` (connected projects, forge, **maximum autonomy**, allow-listed humans), limits, notification settings, App IDs |
 | Project | `.ddf/project.yaml` in the target repository, always read from the integration branch | the project | branches, verify commands, required checks, risk rules, sensitive/forbidden paths, hard stops, zones, requested autonomy |
-| Secrets | `~ddf/.config/ddf/secrets/` mode 0600 on the host | the operator | App private keys, review-signing key, Telegram token, agent CLI tokens and provider keys |
+| Secrets | the read-only `secrets` mount of the control-plane container (§8.1); on the non-container macOS profile `~ddf/.config/ddf/secrets/` mode 0600 on the host | the operator | App private keys, review-signing key, Telegram token, agent CLI tokens and provider keys |
 
 Rules:
 - Policy only tightens across layers. A project can never loosen a product invariant; an operator can never loosen a project's policy.
@@ -76,8 +76,8 @@ Rules:
 |---|---|---|
 | Forge | `forge-local`, `forge-github` | list candidate tasks; read intake actor; create task (with task-key marker); find change by task key; publish change; update change body; update branch from base; read checks for a head; rerun checks; post review; read answers and their authors; merge pinned to a head SHA; revert; close/reopen task; set projection labels. Every write supports **dry-run** (logged, not performed). |
 | Agent | `agent-claude-code`, `agent-opencode` | `run(role, brief, workspace, limits) → result` validated against the role schema (§7.3) |
-| Sandbox | `sandbox-docker` (colima on macOS, Docker on Linux), `sandbox-fake` | create/run/kill a container with mounts, limits and network rules |
-| Notify | `notify-telegram`, `notify-cli` | send event; receive owner answers and commands with sender identity |
+| Sandbox | `sandbox-docker` (container runtime per runtime profile, §8.1), `sandbox-fake` | create/run/kill a container with mounts, limits and network rules |
+| Notify | `notify-cli`; `notify-telegram` deferred to V1.1 | send event; receive owner answers and commands with sender identity |
 | Secrets | `secrets-file` | read a named secret |
 
 ### 4.3 Entry points
@@ -304,7 +304,7 @@ limits:
   maxSubagentsPerRun: 3          # advisory, passed to the agent; not enforceable by the CLIs
 ```
 
-Entries are tried in order. A rate-limited entry is marked cooling until its reset time; the next entry of the tier is used; with no entry left the task waits and one notification is sent. Container limits must fit the container VM size; `ddf status` reports a misfit.
+Entries are tried in order. A rate-limited entry is marked cooling until its reset time; the next entry of the tier is used; with no entry left the task waits and one notification is sent. Container limits must fit the resources of the container runtime; `ddf status` reports a misfit.
 
 ### 7.3 Agent adapter contract
 
@@ -324,7 +324,11 @@ Entries are tried in order. A rate-limited entry is marked cooling until its res
 
 ### 8.1 Host
 
-A dedicated non-admin OS user `ddf` with a private home (mode 700). `ddfd` runs from launchd (macOS) or systemd (Linux) as `ddf`, from a maintainer-promoted DDF ref (§4.4). launchd supervises `ddfd`, not the container VM: `ddfd` checks VM health and restarts the VM itself (§8.4); a launchd colima job is only a boot-time starter (`RunAtLoad`, no `KeepAlive`, so it never races `ddfd`'s own restart). The operator's own home directory and personal forge login are not accessible.
+Two runtime profiles. Both run `ddfd` from a maintainer-promoted DDF ref (§4.4) and give run containers the same isolation properties (§8.4). The operator's own home directory and personal forge login are not accessible in either.
+
+- **Linux container profile (reference deployment from V1):** a Linux host; the control plane (`ddfd`, the store, the secrets) runs in a container; a dedicated non-admin host user `ddf` owns its mounts. The control-plane container has three named mounts: `config` (operator config, read-only), `secrets` (read-only) and `data` (store, clones, run logs). It holds the container runtime's socket to start run containers; on a rootful runtime that socket is host-equivalent. Whether the runtime is rootful or rootless is open and decided by the probe spike; this spec holds for both.
+- **macOS colima profile (second runtime profile):** a dedicated non-admin OS user `ddf` with a private home (mode 700); `ddfd` runs from launchd as `ddf`, not in a container. The fixed home-directory locations are the defaults of this non-container profile in place of the mounts: `~ddf/.config/ddf/secrets/` for secrets, `~ddf/work/` and `~ddf/runs/` for data; the operator config is the folder the operator chose (§3). launchd supervises `ddfd`, not the container VM: `ddfd` checks VM health and restarts the VM itself (§8.4); a launchd colima job is only a boot-time starter (`RunAtLoad`, no `KeepAlive`, so it never races `ddfd`'s own restart).
+- **Weak host:** a host with 1–2 GB of memory orchestrates; heavy verify runs in forge CI. A project's CI may use a self-hosted runner: that is project CI, which DDF only reads as required checks (§8.5); DDF itself needs no runner. Such a runner is ephemeral, isolated and never runs as the control-plane host user.
 
 ### 8.2 GitHub identity
 
@@ -348,8 +352,15 @@ The token broker mints an installation token per operation, narrowed to one repo
 
 ### 8.4 Containers
 
-- One per run; base image from `images/` or the project's `image`; non-root user with a fresh, empty home; default limits 3 GB RAM, 2 CPU, pids limit; no Docker socket.
-- **No access to host services.** On colima, firewall rules inside the VM drop container traffic to the VM's gateway to the host loopback and to the VM itself, except DNS; containers reach only the internet. The rules do not survive a VM restart. The daemon applies them (`colima ssh -- sudo …`) after every VM start or recreation; colima provision hooks may add an early layer but are never the guarantee. Before every container start the daemon checks that the rules exist and runs the host-reachability probe; on failure it re-applies the rules once and re-probes; still failing → container runtime unavailable (§9). Rules found missing while no VM restart was observed (VM boot ID unchanged since the daemon last applied them) are a tamper signal: global pause with reason `security` (§9), no automatic lift. If the VM is down, `ddfd` restarts it as `ddf` (`colima start`, bounded attempts), then applies and probes the rules. The probe also holds in §14.1.
+- One per run; base image from `images/` or the project's `image`; fresh, empty home; default limits 3 GB RAM, 2 CPU, pids limit.
+- **Isolation properties.** Every run container has: no route to the host, the control plane or private address ranges (DNS excepted); all capabilities dropped; no new privileges; a non-root user; pids and memory limits; no container runtime socket. One probe set checks them (§14.1 probe 6). Each runtime profile says how it provides them and must pass the same probes.
+- **Pause reason for isolation rules** (every profile). Each runtime profile defines a runtime instance identifier (for example a boot or daemon start identifier). Each time the daemon applies the isolation rules it records that identifier and a fingerprint of the applied rules; this is the "unchanged" baseline. Before every container start the daemon reads the current identifier, checks the rules against the fingerprint and runs the probes. A changed identifier is an observed runtime restart; a fingerprint mismatch with the same identifier is tampering. Precedence:
+  1. Rules absent or changed (fingerprint mismatch) while no runtime restart was observed (same identifier) → tamper signal: global pause with reason `security` (§9), no automatic lift, even when a re-apply would succeed; a silent re-apply does not clear it.
+  2. After an observed runtime restart (changed identifier), or when the rules match but a probe fails, the daemon re-applies the rules once and re-probes; rules still absent or unverifiable → container runtime unavailable, reason `runtime` (§9).
+  3. Runtime down and the daemon's own restart attempts failed → `runtime` (§9).
+  `runtime` lifts automatically once health check, isolation-rule check and probes pass; `security` only by `ddf resume` / `/resume`.
+- **Linux container profile:** provides the properties through the runtime's per-container options and network rules; how exactly is decided by the probe spike together with rootful or rootless.
+- **macOS colima profile:** colima firewall rules, applied via `colima ssh`, are this profile's way to provide "no route". On colima, firewall rules inside the VM drop container traffic to the VM's gateway to the host loopback and to the VM itself, except DNS; containers reach only the internet. The rules do not survive a VM restart. The daemon applies them (`colima ssh -- sudo …`) after every VM start or recreation; colima provision hooks may add an early layer but are never the guarantee. Before every container start the daemon checks that the rules exist and runs the host-reachability probe; on failure it follows the precedence above. Rules found missing while no VM restart was observed (VM boot ID, this profile's runtime instance identifier, unchanged since the daemon last applied them) are a tamper signal: global pause with reason `security` (§9), no automatic lift. If the VM is down, `ddfd` restarts it as `ddf` (`colima start`, bounded attempts), then applies and probes the rules. The probe also holds in §14.1.
 - Services (databases, browsers) run inside the container.
 - Network egress to the internet is open in V1 (model APIs, package registries) — accepted risk.
 - **Redaction before publication.** Before every forge write and every notification send, all agent-originated text (review projection comments, change body, commit message, patch content, Telegram messages) is redacted by secret patterns and by the exact values of the secrets loaded into that run's container. A patch containing a loaded secret value is refused: hard stop `secrets` (§6.4), failed run.
@@ -380,10 +391,10 @@ Agent code runs in the project's CI. A project may be set to `merge-integration`
 |---|---|
 | forge error | fail-closed, exponential backoff |
 | free disk below floor (default 15 GB) | no new runs, notify |
-| container runtime unavailable (the daemon's VM restart attempts failed, or the VM firewall is missing or unverifiable after one re-apply following an observed VM restart; §8.4) | global pause (reason `runtime`), notify; `runtime` is lifted automatically, with a notification, once health check, firewall check and probe pass again |
-| VM firewall rules missing while no VM restart was observed (§8.4) | global pause (reason `security`), notify; no automatic lift |
+| container runtime unavailable (the daemon's restart attempts failed, or isolation rules absent or unverifiable after one re-apply following an observed runtime restart or a probe failure with unchanged rules; §8.4) | global pause (reason `runtime`), notify; `runtime` is lifted automatically, with a notification, once health check, isolation-rule check and probes pass again |
+| isolation rules absent or changed while no runtime restart was observed (§8.4), even when a re-apply would succeed | global pause (reason `security`), notify; no automatic lift |
 | agent authentication failure (§7.3) | global pause (reason `credential`), notify; no automatic lift |
-| host sleep | launchd restarts the daemon (never the VM); expired leases are released |
+| host sleep | the daemon's supervisor restarts it; expired leases are released |
 
 **Run logs:** `~ddf/runs/<task>/<run>/` (brief, result, sanitized CLI output), kept 30 days; secrets redacted by pattern and by loaded secret values (§8.4) before writing.
 
@@ -463,23 +474,24 @@ DDF is a pilot of itself (D1). Its profile marks every security-relevant area as
 | M0 Prep | Local workspace cleanup (separate track). Fact check (§16). | Answers recorded in `.ai/decisions.md` | maintainer |
 | M1 Docs | This spec, `docs/` (concepts, orchestrator, operator skeleton), `prompts/`, `schemas/`, new `AGENTS.md`, issue closures | An interactive session can run a DDF task by `manual-mode` alone | maintainer |
 | M2 Offline core | `model`, `store`, `lifecycle`, `policy`, `scheduler`, `workspace`, `forge-local`, `sandbox-fake`, fake agent; import-boundary test; hosted CI | Full lifecycle (intake → merge, fixing, sync, gate refusals, revert, restart recovery) passes in tests with fakes | maintainer |
-| M3 Real execution | `sandbox-docker`, base image, VM firewall, `context`, `agent-claude-code`, `agent-opencode` | One real task on a fixture repository through `forge-local` with a real model, both adapters; isolation probes pass | maintainer |
+| M3 Real execution | `sandbox-docker`, base image, isolation rules, `context`, `agent-claude-code`, `agent-opencode` | One real task on a fixture repository through `forge-local` with a real model, both adapters; isolation probes pass | maintainer |
 | M4 GitHub + channel | `forge-github` (`apps create`, token broker, intake actors, PRs, reviews, pinned merge, labels), `notify-telegram`, CLI | Dry-run against a sandbox repository: correct reads, intended writes logged, no writes performed | maintainer |
-| M5 Install + pilot | `ddf` user, launchd, operator config, secrets; 24 h dry run on DDF; DDF at `merge-integration`; pilot product profile PR and CI prerequisites | §14.1 acceptance | maintainer until DDF autonomy is on |
+| M5 Install + pilot | Linux container profile (control-plane container, `ddf` host user, three mounts), operator config, secrets; macOS colima profile (`ddf` user, launchd) as the second profile; 24 h dry run on DDF; DDF at `merge-integration`; pilot product profile PR and CI prerequisites; Telegram deferred to V1.1 | §14.1 acceptance on a small always-on arm64 Linux host | maintainer until DDF autonomy is on |
 | M6 Retire | Archive the old workflow repository; remove routing blocks elsewhere; replace standalone agent role configs | No repository references the old canon | DDF / maintainer |
 
 Each milestone gets its own implementation plan.
 
 ### 14.1 V1 acceptance
 
-- On the private pilot product, three real tasks go from intake to merge into the integration branch with no human action; at least one goes through a correction batch; at least one `needs-owner` question/answer round trip via Telegram.
+- On the private pilot product, three real tasks go from intake to merge into the integration branch with no human action; at least one goes through a correction batch; at least one `needs-owner` question/answer round trip via the CLI (Telegram deferred to V1.1).
+- M5 acceptance runs on a small always-on arm64 Linux host in the Linux container profile (reference deployment). Development and probes imitate this weak host in a Linux arm64 VM limited to 1 vCPU and 1–2 GB. The second runtime profile passes the same probes.
 - Probes, each must hold:
   1. a forged or replayed review marker is rejected;
   2. a reviewer cannot be made to approve through workspace agent config (planted hooks/settings are ignored);
   3. a change touching a forbidden path or a symlink is not published;
   4. planted Git hooks/config in the Executor copy never run on the host;
   5. an intake label or answer from a non-allow-listed account is ignored;
-  6. a container cannot reach host loopback services or services on the container VM itself;
+  6. a run container has the isolation properties of §8.4 (no route to the host, the control plane or private address ranges, DNS excepted; all capabilities dropped; no new privileges; non-root user; pids and memory limits; no runtime socket), checked by the one probe set in [security-model.md](../operator/security-model.md#probes) that every runtime profile must pass;
   7. a daemon restart mid-run produces no duplicate task or change;
   8. a head pushed between gate evaluation and merge makes the merge fail;
   9. a Claude rate limit falls back to the opencode entry.
@@ -488,14 +500,14 @@ Each milestone gets its own implementation plan.
 
 - Agent CLI tokens and provider keys are visible inside containers (each container holds only its routed adapter's credential). Publishing them is not accepted: §8.4 redaction and secret-value scanning apply.
 - Network egress from containers is not filtered.
-- IPv6 egress is not filtered in V1; the VM firewall probe fails if a container gets a global IPv6 route.
+- IPv6 egress is not filtered in V1; the isolation probe fails if a container gets a global IPv6 route.
 - The host is a workstation: availability depends on it being on.
 - Private repositories on plans without rulesets have no forge-side protection; there the merge gate is the only enforcement.
 - Project CI executes agent-written code; mitigated only by the prerequisites in §8.5.
 
 ## 16. Facts to verify in M0
 
-Answers, evidence and probe definitions: `docs/research/2026-11-m0-facts.md`; decisions in `.ai/decisions.md` ("M0 facts (2026-11)").
+Answers, evidence and probe definitions: `docs/research/2026-11-m0-facts.md`; decisions in `.ai/decisions.md` ("M0 facts (2026-11)"). Item 5 concerns the macOS colima profile; the Linux container profile (reference deployment) is checked by the probe spike, which also decides rootful or rootless.
 
 1. Whether an approval submitted by a GitHub App counts toward a ruleset's required approvals. If not: machine users for reviewers, and GitHub's terms on how many machine accounts one person may hold. **Answered:** unverified (terms documented): M4 probe `app-approval-counts` (reviewer App with `pull_requests: write`; also try `contents: read`/`write` variants); fallback machine users (≤ 1 free machine account per person per GitHub terms, per research).
 2. Installation token narrowing (repository and permission subset) for all three Apps. **Answered:** documented, supported as §8.2 assumes (repository IDs + permission subset, ≤ 1 h); M4 probe `token-narrowing`.
@@ -547,3 +559,11 @@ Answers, evidence and probe definitions: `docs/research/2026-11-m0-facts.md`; de
 - 2026-11-06 Issue #31: §4.4 — runtime model recorded as hybrid: long-lived control plane, disposable per-task execution side; follow-ups #33, #34, #35 (see docs/research/2026-11-runtime-and-language.md, .ai/decisions.md ADR 1)
 - 2026-11-06 Issue #32: §4.4 — Go layout `internal/` + `cmd/` and a standard-library boundary test (owner choices, see docs/plans/2026-11-05-m2-offline-core.md OD-15, OD-16)
 - 2026-11-06 Issue #32: §12 — Go paths; aligned with the manual-mode profile: migrations, daemon and Publisher globs and the `ciEntrypoints` added (closes #30; see docs/orchestrator/manual-mode.md#ddfs-own-profile-until-ddfprojectyaml-exists)
+- 2026-11-10 Issue #45: §2 D2, D9, D10 — reference deployment is the Linux container profile, macOS colima profile second; Telegram deferred to V1.1; isolation by properties (owner decisions of #43, see .ai/decisions.md)
+- 2026-11-10 Issue #45: §3, §4.2 — secrets in the read-only `secrets` mount; Sandbox runtime per profile; Notify `notify-cli` in V1, `notify-telegram` in V1.1
+- 2026-11-10 Issue #45: §7.2 — container limits fit the container runtime's resources
+- 2026-11-10 Issue #45: §8.1 — two runtime profiles; control-plane container with `config`, `secrets`, `data` mounts; rootful or rootless open; weak host and project self-hosted runners
+- 2026-11-10 Issue #45: §8.4 — run-container isolation properties, one probe set, per-profile provision; colima firewall as the macOS profile's "no route"; profile-neutral `security`/`runtime` precedence from a runtime instance identifier and a rule fingerprint recorded at apply time
+- 2026-11-10 Issue #45: §9 — pause reasons `runtime` and `security` defined by isolation-rule properties; host sleep row profile-neutral
+- 2026-11-10 Issue #45: §14, §14.1 — M3 isolation rules; M5 on a small always-on arm64 Linux host, probes in a 1 vCPU, 1–2 GB Linux arm64 VM; probe 6 names the properties and links the single list; `needs-owner` round trip via the CLI
+- 2026-11-10 Issue #45: §15, §16 — IPv6 line names the isolation probe; §16 item 5 scoped to the macOS colima profile
