@@ -30,7 +30,7 @@ The operator's own home directory and personal forge login are not accessible to
 ## Steps (target order)
 
 1. **Create the service user.** A non-admin account named `ddf` with a home directory readable only by itself. The operator's personal account keeps its own forge login; DDF never uses it.
-2. **Install the container runtime** (Linux container profile: the container runtime on the Linux host; macOS colima profile: colima for the `ddf` user, plus the boot-time colima starter, [M0 recipe](#m0-recipe)). Size the runtime's resources so that `limits.maxConcurrentContainers` × the container limits (default 3 GB RAM, 2 CPU each) fit; `ddf status` reports a misfit ([routing.md](../concepts/routing.md#limits)).
+2. **Install the container runtime** (Linux container profile: the container runtime on the Linux host; macOS colima profile: colima for the `ddf` user, plus the boot-time colima starter, [M0 recipe](#m0-recipe)). The scheduler admits runs against the host capacity (CPU, memory, disk) the runtime reports, with an operator override; per-run limits come from the sizing rule in [#34](https://github.com/syllik/deep-dark-factory/issues/34) ([routing.md](../concepts/routing.md#limits)).
 3. **Check out DDF** at a promoted ref (macOS colima profile: into the `ddf` home). Updating the daemon is always a human action: promote, then move the checkout.
 4. **Scaffold the operator config** with `ddf setup`. It creates `routing.yaml` and `projects.yaml` in the chosen private repository or folder. That repository must never be connected as a DDF project ([config-layers.md](../concepts/config-layers.md#rules)).
 5. **Create the GitHub Apps** (GitHub projects only) with `ddf apps create`: three Apps, owned by the operator, installed only on selected repositories ([forge-github](../adapters/forge-github.md)).
@@ -44,7 +44,7 @@ The operator's own home directory and personal forge login are not accessible to
 - **macOS colima profile:** a launchd job for the `ddf` user. launchd restarts the daemon (never the VM) after host sleep; expired run leases are released on start ([spec §9](../specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery)).
 - **macOS colima profile:** launchd supervises `ddfd`, not the container VM: `ddfd` checks VM health and restarts the VM itself. A separate launchd colima job is only a boot-time starter (`RunAtLoad`, no `KeepAlive`, so it never races `ddfd`'s own restart) ([spec §8.1](../specs/2026-11-03-ddf-v1-design.md#81-host)).
 - **Linux container profile:** a systemd unit that runs the control-plane container as the host user `ddf`.
-- On start the daemon takes the instance lock, kills containers from a previous instance, discards their runs (retried within budget) and reconciles unresolved forge intents by task-key marker.
+- On start the daemon takes the instance lock and lists execution resources by label (task key, run ID): resources whose task is terminal or unknown to the store are destroyed and verified, and the teardown is recorded; resources of a non-terminal task are, in V1, killed and their run discarded (retried within budget). It then reconciles unresolved forge intents by task-key marker ([lifecycle.md](../concepts/lifecycle.md#store-intents-and-leases), [spec §9](../specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery)).
 
 ## Container runtime
 
