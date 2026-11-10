@@ -34,14 +34,20 @@ An interactive session re-sends its whole context on every turn. Prompt caching 
 
 - **Context size** is the sum of input, cache-read and cache-write tokens of the session's latest main-conversation model turn (subagent turns do not count). The session reads it from a deterministic source ([Claude Code hook](../adapters/agent-claude-code.md#interactive-sessions)), never from its own estimate.
 - **Checkpoint:** a PR reaches `merge`, a task ends, or the session starts waiting on the owner.
+- **Baseline:** the context size at the session's first measured turn: the system prompt, tools and instructions that a new session pays for again anyway.
+- **Working context:** the current context size minus the baseline.
+- **Room:** the model's context window as the harness reports it, or the operator cap if it is lower, minus the baseline.
+- **Operator cap** (optional): an absolute token count for cost, absent by default and set only in the operator's own settings. When set, the effective window is min(window, cap), and the shares below apply to the room under it.
+- **Limits:** soft and hard are operator-chosen shares of the room. A limit is reached when working context ≥ share × room. There are no fixed token numbers.
 
-| Limit | Default | Action |
+| Limit | Example share of the room | Action |
 |---|---|---|
-| soft | 120000 tokens | at the next checkpoint: post a handoff; the work continues in a new session started from it |
-| hard | 160000 tokens | finish the current step, post a handoff, stop |
+| soft | 0.6 | advice: at the next checkpoint, rotate (post a handoff; the work continues in a new session started from it) when the remaining work is long or a pause will outlast the prompt cache |
+| hard | 0.85, then again every 0.1 of the room past it | start no new step; finish the current one, then only the closing actions: post the result, post the handoff, answer the owner's questions about the result; then stop |
 
-- Past the soft limit, before a pause expected to outlast the prompt cache, post a handoff first.
-- The limits are operator-chosen; the defaults assume a 200000-token context window. Auto-compaction is not a substitute: it keeps the session going with a summary the session did not write.
+- The shares in the table are an example, not a default the rules depend on; the operator chooses them. How a harness measures the context size, the window and the baseline: [Claude Code](../adapters/agent-claude-code.md#interactive-sessions).
+- A task whose required reading exceeds the budget is split in its brief before it starts.
+- Auto-compaction is not a substitute: it keeps the session going with a summary the session did not write.
 - Daemon runs are out of scope: each run is a fresh process with a bounded brief ([agent-claude-code.md](../adapters/agent-claude-code.md#contract)).
 
 ## Starting from a handoff
