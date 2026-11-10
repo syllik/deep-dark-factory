@@ -152,3 +152,15 @@ Source: Issue #45, owner decisions of #43. Amends D2, D9 and D10 above; the orig
 - 2026-11-10 D9 amended: Telegram deferred to V1.1; the Notify port and the CLI stay. Spec §2, §4.2, §14, §14.1. Task: #45.
 - 2026-11-10 AGENT-DEFAULT: Where does the single list of isolation probes live? → `docs/operator/security-model.md` Probes holds the list; spec §14.1 probe 6 names the properties and links to it. Task: #45.
 - 2026-11-10 AGENT-DEFAULT: What are the two runtime profiles called? → "Linux container profile" (reference) and "macOS colima profile". Task: #45.
+
+## 2026-11-10 Context budget derived from the context window (Issue #44)
+
+Source: Issue #44, owner decisions in chat on 2026-11-10. Amends the 2026-11-07 line above, which stays as approved.
+
+- 2026-11-10 Context budget amended: soft and hard limits are operator-chosen shares of the room, not fixed token numbers. Baseline = the context size at the session's first measured turn; working context = current size minus baseline; room = the context window as the harness reports it (or the operator cap, if lower) minus baseline. Rules: `docs/orchestrator/handoff.md#context-budget`; hook recipe: `docs/adapters/agent-claude-code.md#interactive-sessions`. Task: #44.
+- 2026-11-10 Owner decision: the example shares are soft 0.6 and hard 0.85 of the room, and the warning repeats every 0.1 of the room past hard. The optional operator cap (absolute tokens, for cost, absent by default, set only in the operator's own settings) acts as the effective window: shares apply to min(window, cap) minus baseline. Task: #44.
+- 2026-11-10 Owner decision: soft is advice at a checkpoint; hard means start no new step, with only the closing actions allowed (post the result, post the handoff, answer the owner's questions about the result). Starting the successor session stays an owner action and is out of scope. Task: #44.
+- 2026-11-10 AGENT-DEFAULT: Does the hook script fall back to default shares when the operator sets none? → Yes: it uses the documented example shares (0.6 soft, 0.85 hard, 0.1 step) as ratio defaults. These are not token numbers. Window and cap have no default. Task: #44.
+- 2026-11-10 AGENT-DEFAULT: Operator setting names in the recipe? → Env vars DDF_CONTEXT_SOFT_SHARE, DDF_CONTEXT_HARD_SHARE, DDF_CONTEXT_STEP_SHARE, DDF_CONTEXT_CAP, DDF_CONTEXT_WINDOW (the last used only when the harness reports no window). DDF_CONTEXT_SOFT/HARD are removed. Task: #44.
+- 2026-11-10 AGENT-DEFAULT: What happens when the cap (or window) is not above the baseline (room <= 0)? → The hook stays silent and the status line prints 'ctx -', the same as when it cannot measure. Task: #44.
+- 2026-11-10 AGENT-DEFAULT: Which baseline does the transcript fallback use? → The same per-session baseline file: the first size measured by either source, written once. Task: #44.
