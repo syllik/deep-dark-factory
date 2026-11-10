@@ -29,8 +29,8 @@ tiers:
 roles:
   r2: {prefer: [{adapter: opencode, model: <other-provider/model>}]}   # optional
 limits:
-  maxConcurrentContainers: 2
   maxSubagentsPerRun: 3
+  # maxConcurrentContainers: 2   # optional operator cap; capacity comes from the Sandbox port
 ```
 
 ## Selection and fallback
@@ -42,9 +42,10 @@ limits:
 
 ## Limits
 
-- `maxConcurrentContainers`: every container counts — Executor, each reviewer, local gate, `forge-local` CI.
+- **Capacity:** the scheduler admits runs against the host capacity (CPU, memory, disk) reported by the Sandbox port, with an operator override: an operator setting in routing `limits` that replaces the port-reported values; its exact key and schema land with the sizing rule in [#34](https://github.com/syllik/deep-dark-factory/issues/34). Per-run limits come from that sizing rule. Every container counts — Executor, each reviewer, local gate, `forge-local` CI ([spec §7.2](../specs/2026-11-03-ddf-v1-design.md#72-operator-routing), [spec §4.1](../specs/2026-11-03-ddf-v1-design.md#41-core-no-network-no-forge-no-provider)).
+- `maxConcurrentContainers` (optional, no default): an operator cap on concurrent containers, applied on top of capacity; not the scheduling input.
 - `maxSubagentsPerRun` (default 3): advisory, passed to the agent; not enforceable by the CLIs.
-- Container limits must fit the container VM size; `ddf status` reports a misfit.
+- Per-run limits must fit the reported capacity; `ddf status` reports a misfit.
 - Optional per-task `maxCostUsd` for API-key-billed entries. No per-stage human grants and no per-call USD reservations.
 
 ## Agent adapter contract

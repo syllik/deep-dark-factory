@@ -18,7 +18,7 @@ Maps tiers and roles to agent adapters and models. Selection and fallback rules:
 |---|---|---|---|---|
 | `tiers` | object | yes | none | keys `deep`, `standard`, `routine`, `fast`; `deep` and `standard` required |
 | `roles` | object | no | none | per-role preferences, tried before the role's tier entries |
-| `limits` | object | no | none | concurrency limits |
+| `limits` | object | no | none | optional caps and advisory limits |
 
 ### `tiers`
 
@@ -55,8 +55,10 @@ Entries are tried in order; a rate-limited entry (HTTP 429 only) cools until its
 
 | Key | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `limits.maxConcurrentContainers` | integer ≥ 1 | no | none (spec example: 2) | every container counts: Executor, each reviewer, local gate, forge-local CI |
+| `limits.maxConcurrentContainers` | integer ≥ 1 | no | none | optional operator cap on concurrent containers (every container counts: Executor, each reviewer, local gate, forge-local CI); not the scheduling input: the scheduler admits runs against the host capacity reported by the Sandbox port ([routing.md](../concepts/routing.md#limits)) |
 | `limits.maxSubagentsPerRun` | integer ≥ 0 | no | 3 | advisory, passed to the agent; not enforceable by the CLIs |
+
+The operator override for host capacity (a setting in routing `limits` that replaces the values reported by the Sandbox port) gets its key and schema with the sizing rule in [#34](https://github.com/syllik/deep-dark-factory/issues/34) ([spec §7.2](../specs/2026-11-03-ddf-v1-design.md#72-operator-routing)).
 
 ### Example
 
@@ -71,7 +73,7 @@ tiers:
 roles:
   r2: {prefer: [{adapter: opencode, model: "<other-provider/model>"}]}
 limits:
-  maxConcurrentContainers: 2
+  maxConcurrentContainers: 2   # optional cap; omit to use the host capacity only
   maxSubagentsPerRun: 3
 ```
 
