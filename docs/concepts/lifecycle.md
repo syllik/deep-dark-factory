@@ -161,8 +161,8 @@ Gate refusals map to transitions ([spec §5.2](../specs/2026-11-03-ddf-v1-design
 | `owner` | `ddf pause`, Telegram `/pause` | `ddf resume` / `/resume` |
 | `credential` | agent authentication failure ([routing.md](routing.md#agent-adapter-contract)) | `ddf resume` / `/resume` |
 | `revert-red` | second DDF-attributed red within 24 h ([revert](#revert)) | `ddf resume` / `/resume` |
-| `runtime` | container runtime unavailable: the daemon's own runtime restart failed, or isolation rules absent or unverifiable after one re-apply | automatically, with a notification, once health check, isolation-rule check and probes pass again |
-| `security` | isolation rules changed without a runtime restart | `ddf resume` / `/resume` |
+| `runtime` | container runtime unavailable: the daemon's own runtime restart failed, or isolation rules absent or unverifiable after one re-apply following an observed runtime restart or a probe failure | automatically, with a notification, once health check, isolation-rule check and probes pass again |
+| `security` | isolation rules absent or changed while no runtime restart was observed (same runtime instance identifier), even when a re-apply would succeed ([spec §8.4](../specs/2026-11-03-ddf-v1-design.md#84-containers)) | `ddf resume` / `/resume` |
 
 Rationale: [spec §9](../specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery), [spec §8.4](../specs/2026-11-03-ddf-v1-design.md#84-containers).
 
