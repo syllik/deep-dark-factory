@@ -6,7 +6,7 @@ Status: normative
 
 Rationale and full design: [spec §7.1](../specs/2026-11-03-ddf-v1-design.md#71-roles-and-default-tiers) and decision D4 in [spec §2](../specs/2026-11-03-ddf-v1-design.md#2-maintainer-decisions-2026-11-03). Roles name tiers (`frontier|deep|standard|routine|fast`), never models; tiers map to models only in operator routing ([routing.md](routing.md)).
 
-Agent roles run only inside containers, receive a brief and a workspace copy, write `/out/result.json` validated against their role schema, and never hold forge credentials or the review-signing key. Trusted roles are daemon code on the host. The daemon is the orchestrator.
+Agent roles run only inside run containers: each receives a brief, acts on a workspace copy, and returns a result validated against its role schema through the Agent port ([routing.md](routing.md#port-level)). Agent roles never hold forge credentials or the review-signing key. Trusted roles are daemon code on the host. The daemon is the orchestrator.
 
 | Role | Kind | Tier | Tools | Output |
 |---|---|---|---|---|
@@ -64,7 +64,7 @@ Tier rules:
 - Role id `r2`; required for `standard` and `sensitive` (at `deep`), or when R1 raises the class.
 - Focus: security, data, hard stops; always returns the hard-stop checklist.
 - Same isolation as R1: read/search only, no command execution, fresh read-only container.
-- With `reviewers.r2DifferentProvider: true`, runs on a different provider than the Executor.
+- With `reviewers.r2DifferentProvider: true`, runs on a different provider than the Executor: the routing entries' `provider` is compared, not adapter or model ([routing.md](routing.md#selection-and-fallback)).
 - Output: findings with `securityLevel`, hard-stop checklist, `APPROVE` / `REQUEST_CHANGES`.
 - Bounds: 1 h timeout, 1 retry on invalid result.
 

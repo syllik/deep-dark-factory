@@ -9,6 +9,7 @@ verify:                              # run inside containers only
   - npm test
 checks:
   required: [test]                   # exact forge check names the merge gate requires
+registries: [registry.npmjs.org]     # verify runs `npm ci`; omit when the image carries the dependencies
 risk:
   lowMaxLines: 200
   docs: ["docs/**", "**/*.md"]

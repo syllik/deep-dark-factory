@@ -51,9 +51,14 @@
     "entry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["adapter", "model"],
+      "required": ["adapter", "provider", "model"],
       "properties": {
         "adapter": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "provider": {
+          "description": "The model provider the entry calls. DDF compares only this field (reviewers.r2DifferentProvider) and never derives it from model.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
         "model": { "type": "string", "minLength": 1 },
         "effort": { "enum": ["low", "medium", "high"] }
       }

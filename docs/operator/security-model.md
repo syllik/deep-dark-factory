@@ -89,8 +89,8 @@ One list, one probe per isolation property (§8.4). Every runtime profile must p
 
 From [spec §15](../specs/2026-11-03-ddf-v1-design.md#15-accepted-risks-v1):
 
-- Agent CLI tokens and provider keys are visible inside containers (each container holds only its routed adapter's credential). Publishing them is not accepted: §8.4 redaction and secret-value scanning apply.
-- Network egress from containers is not filtered.
+- A run container holds only the credential of its routed adapter, received through the credential source ([§8.4](../specs/2026-11-03-ddf-v1-design.md#84-containers)). A real pay-per-token provider key never enters a run container: the per-run token implementation of the credential source is in place before the first pay-per-token key is loaded. Agent CLI subscription tokens that cannot be proxied stay visible inside their routed adapter's container; this is an accepted risk, on a dedicated account. Publishing any of them is not accepted ([§8.4](../specs/2026-11-03-ddf-v1-design.md#84-containers) redaction).
+- Run-container egress is restricted per adapter from M3 ([§8.4](../specs/2026-11-03-ddf-v1-design.md#84-containers)): an agent run reaches only its routed adapter's provider endpoint, and Executor runs, the local gate and `forge-local` CI also reach the project's declared registries. Before M3 this restriction is not yet enforced.
 - IPv6 egress is not filtered in V1; the isolation probe fails if a container gets a global IPv6 route.
 - The host is a workstation: availability depends on it being on.
 - Private repositories on plans without rulesets have no forge-side protection; there the merge gate is the only enforcement.

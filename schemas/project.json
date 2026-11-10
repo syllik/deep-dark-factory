@@ -37,6 +37,15 @@
       "type": "string",
       "minLength": 1
     },
+    "registries": {
+      "description": "Registry host names (no scheme, path or port) a verify that installs at run time needs. They join the egress allow-list of this project's Executor, local-gate and forge-local CI containers, enforced from M3. Project dependencies come from the project image by default. Default none.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
+      }
+    },
     "risk": {
       "type": "object",
       "additionalProperties": false,
@@ -87,7 +96,7 @@
       "additionalProperties": false,
       "properties": {
         "r2DifferentProvider": {
-          "description": "Require R2 on a different provider than the Executor.",
+          "description": "Require R2 on a different provider than the Executor: R2 uses only routing entries whose provider differs from the provider of the entry that ran the Executor for the reviewed head. Adapter and model are not compared.",
           "type": "boolean",
           "default": false
         }

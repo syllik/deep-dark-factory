@@ -8,6 +8,7 @@ verify:                              # run inside containers only
 checks:
   required: [verify]                 # forge check names the gate requires
 image: .ddf/Dockerfile               # optional; default base image otherwise
+registries: [registry.npmjs.org]     # verify runs `npm ci`; omit when the image carries the dependencies
 risk:
   lowMaxLines: 200
   docs: ["docs/**", "**/*.md"]
