@@ -18,6 +18,14 @@ Mode: <manual | supervisor>
 - <PR link> · owner action · <start reviewer session r1 | r2 at head `<full SHA>` | post comment <heading> on <target>>
 - <PR link> · ready for human merge at head `<full SHA>`
 
+### Decided
+
+- <decision, one line> (<link to where it is recorded: decision log entry, planner result comment, PR or Issue comment>)
+
+### Failed
+
+- <task or PR link>: <approach tried> · dropped: <reason> (<link to the trace, if any: PR, commit, review or comment>)
+
 ### Next
 
 1. <first concrete step for the next session>

@@ -23,6 +23,8 @@ Handoffs **replace dated local handoff files**. State lives in the forge (Issues
 | `Done` | merged PRs and closed Issues since the last handoff |
 | `In flight (PR, head SHA, state)` | one line per open PR: PR link, full head SHA, lifecycle state (`ci`, `review`, `fixing`, `merge`), reviews present for that head, correction batches used of 3 |
 | `Waiting on owner` | each `needs-owner` item: category and the one-line question, with a link to the comment that asks it; each owner action that is not `needs-owner`: reviewer sessions to start (PR, full head SHA, roles) and comment texts to post (target and heading); PRs ready for human merge |
+| `Decided` | one line per decision taken since the last handoff, or carried over from it while its task is open: the decision and a link to where it is recorded (for example the `.ai/decisions.md` entry, a planner result comment or a PR comment); no reasoning restated. A decision that exists only in the session chat is recorded first, then linked |
+| `Failed` | one line per approach tried and dropped since the last handoff, or carried over from it while its task is open: task or PR link, the approach, the reason it was dropped, and a link to its trace (PR, commit, review or comment) when one exists; not a narrative of the attempt |
 | `Next` | the next concrete step per task, in order; first line is what the next session does first |
 | `Worktrees` | branch of each live worktree and whether it may be deleted (only when its PR is `MERGED`) |
 
@@ -52,4 +54,4 @@ An interactive session re-sends its whole context on every turn. Prompt caching 
 
 ## Starting from a handoff
 
-A new session reads `AGENTS.md`, the mode doc ([manual-mode.md](manual-mode.md) or [supervisor-mode.md](supervisor-mode.md)), then the newest handoff comment on the tracking Issue. Before acting it re-checks each `In flight` line against the forge (head SHA, checks, reviews); the forge wins over the handoff.
+A new session reads `AGENTS.md`, the mode doc ([manual-mode.md](manual-mode.md) or [supervisor-mode.md](supervisor-mode.md)), then the newest handoff comment on the tracking Issue. Before acting it re-checks each `In flight` line against the forge (head SHA, checks, reviews); the forge wins over the handoff. It does not reopen a `Decided` item or retry a `Failed` approach unless a new fact (a forge change or an owner message) contradicts it.
