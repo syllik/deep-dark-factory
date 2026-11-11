@@ -192,3 +192,11 @@ Source: Issue #54, DDF review r2 @ 2c01f56 on PR #53, findings r2-1 and r2-2. Sp
 - 2026-11-11 AGENT-DEFAULT: Does spec §8.4 (Egress per run, Redaction) change as well? → No. The residual channel is named only in §15 and security-model.md Accepted risks, as the Issue asks; §8.4 already states host-level egress and redaction correctly. Task: #54.
 - 2026-11-11 AGENT-DEFAULT: Do docs/concepts/routing.md and identity.md get the same residual-channel wording? → No. They are outside #54's file list and are edited by the parallel task #49; routing.md's Accepted schedule already matches the credential rule. Task: #54.
 - 2026-11-11 AGENT-DEFAULT: The new rule 'directories 0700' contradicts existing text calling the `~ddf/.config/ddf/secrets/` directory 'mode 0600'; fix the contradiction beyond the three places the Issue names? → Yes, in spec section 3 Secrets row, config-layers.md Secrets row, identity.md Host secrets bullet and setup.md Secrets layout paragraph; the security-model.md secrets table row is left to #54. Task: #49.
+
+## 2026-11-11 Auto-rotation at the hard context limit (Issue #57)
+
+Source: Issue #57, owner request in the session chat.
+
+- 2026-11-11 At the hard context limit, after the result and the handoff are posted, an interactive session whose harness can start sessions rotates by itself: one successor with a fresh context in its own checkout, started, confirmed, released from the ending session, reported to the owner, then the ending session ends itself. Any refusal falls back to the previous behaviour (stop without ending the session). The soft limit stays advice. The owner's standing permission lives in the operator's agent settings, not in DDF. Rules: `docs/orchestrator/handoff.md#rotation`; desktop-app mapping and hook text: `docs/adapters/agent-claude-code.md#rotation-in-the-desktop-app`. Task: #57.
+- 2026-11-11 AGENT-DEFAULT: Does the successor inherit the ending session's model? → Not by these rules: its tier follows routing like any session; the rotation rules do not name a tier. Task: #57.
+- 2026-11-11 AGENT-DEFAULT: What happens when the hard warning repeats past the limit after a successor was started? → Nothing new: exactly one successor per session; the repeat never starts a second one. Task: #57.

@@ -60,7 +60,7 @@ Limits follow the [handoff rules](../orchestrator/handoff.md#context-budget): sh
 - `DDF_CONTEXT_CAP`: a cap on the total context in tokens, for cost; it acts as the effective window, min(window, cap);
 - `DDF_CONTEXT_WINDOW`: the window size, used only when the harness reports none.
 
-The hook runs on `UserPromptSubmit` and `PostToolUse` and only adds context through `hookSpecificOutput.additionalContext`. On either event it warns once when the working context crosses soft, once when it crosses hard, and then once per step share of the room past hard; never on every prompt. The last warned level and size are kept in state, so a drop below a limit (after compaction, for example) re-arms the warning. Hook events from subagents (the input carries `agent_id`) are ignored: they neither receive the warning nor count as warned for the main session. Warning texts name no project, repository or path; the hard text names the closing actions. State is kept in a per-user directory, `$XDG_RUNTIME_DIR/ddf-context-budget` or else `~/.cache/ddf-context-budget`; the script uses it only if it is a real directory (not a symlink) owned by the current user with no group or other permissions, and replaces state files by writing a new file and renaming it, so it never writes through a symlink. It never blocks, and on any error it exits 0 silently.
+The hook runs on `UserPromptSubmit` and `PostToolUse` and only adds context through `hookSpecificOutput.additionalContext`. On either event it warns once when the working context crosses soft, once when it crosses hard, and then once per step share of the room past hard; never on every prompt. The last warned level and size are kept in state, so a drop below a limit (after compaction, for example) re-arms the warning. Hook events from subagents (the input carries `agent_id`) are ignored: they neither receive the warning nor count as warned for the main session. Warning texts name no project, repository or path; the hard text names the closing actions, the [rotation](#rotation-in-the-desktop-app) steps and the fallback. State is kept in a per-user directory, `$XDG_RUNTIME_DIR/ddf-context-budget` or else `~/.cache/ddf-context-budget`; the script uses it only if it is a real directory (not a symlink) owned by the current user with no group or other permissions, and replaces state files by writing a new file and renaming it, so it never writes through a symlink. It never blocks, and on any error it exits 0 silently.
 
 Save as `ddf-context-budget.mjs` (Node 18 or later):
 
@@ -196,7 +196,11 @@ try {
 
   const used = `${k(tokens - L.base)} of ${k(L.room)} working room used`;
   const text = level === 2
-    ? `Context budget: hard limit, ${used}. Start no new step. Finish the current step, then only: post the result, post the handoff, answer the owner's questions about the result. Then stop.`
+    ? `Context budget: hard limit, ${used}. Start no new step. Finish the current step, post the result and the handoff, then rotate when the harness can start sessions (Claude desktop app): `
+      + `1) start one successor with fresh context (never a fork; none if one was already started), not inside this session's worktree, whose brief is only: read AGENTS.md, the mode doc and the newest handoff on the tracking Issue, then continue from its Next section; `
+      + `2) once the result confirms it started, detach it so archiving this session does not archive it; `
+      + `3) give the owner the successor's link in one line, then archive this session. `
+      + `If the start is refused or unavailable, or the successor cannot be detached: answer the owner's questions about the result, then stop without archiving.`
     : `Context budget: soft limit, ${used}. Advice: at the next checkpoint, if the remaining work is long or a pause will outlast the prompt cache, post a handoff and continue in a new session.`;
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: text } }));
 } catch {}
@@ -216,3 +220,21 @@ Settings snippet for the operator's user settings (replace the path; keep an exi
 ```
 
 Facts used: the Claude Code [hooks](https://code.claude.com/docs/en/hooks) page (common input fields, `agent_id` on events fired inside a subagent, `additionalContext`, exit 0 never blocks) and the [status line](https://code.claude.com/docs/en/statusline) page (`session_id`, `context_window.total_input_tokens`, `context_window.context_window_size`). The transcript entry shape is observed, not documented: if it changes, the fallback returns nothing and the hook stays silent.
+
+### Rotation in the desktop app
+
+The Claude desktop app (Code tab) gives a session actions to start, detach and archive sessions; the terminal CLI has none, so a CLI session stops at the hard limit as before. The [rotation rules](../orchestrator/handoff.md#rotation) map to them:
+
+| Rule step | Desktop-app action |
+|---|---|
+| start one successor with a fresh context | start a session with a fresh context (not a fork) and a brief that names the tracking Issue and the starting steps; give it its own worktree, or the plain project folder when the ending session has no worktree |
+| confirmed start | the start action's result reports the session as started |
+| release the successor | detach it to top level: a session started by another is otherwise archived together with it when it is idle |
+| tell the owner | one line with the successor's link |
+| end this session | archive this session itself; archiving stops it and, by default, removes its worktree |
+
+Fallbacks, observed in the app and not documented:
+
+- **Start refused:** on a turn started by another session's message or an automated event rather than by the owner, the app refuses to start a session; the session may leave a proposal card for the owner instead, and stops.
+- **Detach refused:** a session that shares another session's worktree cannot be detached; this is why the successor never runs inside the ending session's worktree.
+- **Archive approval:** the app asks the owner to approve each archive unless the session's permission mode lets it decide alone, and refuses to archive a session that is pinned or still working. Until the owner approves, the ending session waits; nothing else depends on it, since the successor already runs on its own.
