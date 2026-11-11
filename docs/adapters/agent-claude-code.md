@@ -58,9 +58,10 @@ Limits follow the [handoff rules](../orchestrator/handoff.md#context-budget): sh
 
 - `DDF_CONTEXT_SOFT_SHARE`, `DDF_CONTEXT_HARD_SHARE`, `DDF_CONTEXT_STEP_SHARE`: the soft and hard shares of the room and the step past hard (ratio defaults 0.6, 0.85 and 0.1, the example from the handoff rules);
 - `DDF_CONTEXT_CAP`: a cap on the total context in tokens, for cost; it acts as the effective window, min(window, cap);
-- `DDF_CONTEXT_WINDOW`: the window size, used only when the harness reports none.
+- `DDF_CONTEXT_WINDOW`: the window size, used only when the harness reports none;
+- `DDF_CONTEXT_ROTATE`: `1` is the operator's standing permission for [rotation](../orchestrator/handoff.md#rotation) and selects the rotating hard text; unset or any other value selects the hard text without rotation (default: no rotation).
 
-The hook runs on `UserPromptSubmit` and `PostToolUse` and only adds context through `hookSpecificOutput.additionalContext`. On either event it warns once when the working context crosses soft, once when it crosses hard, and then once per step share of the room past hard; never on every prompt. The last warned level and size are kept in state, so a drop below a limit (after compaction, for example) re-arms the warning. Hook events from subagents (the input carries `agent_id`) are ignored: they neither receive the warning nor count as warned for the main session. Warning texts name no project, repository or path; the hard text names the closing actions, the [rotation](#rotation-in-the-desktop-app) steps and the fallback. State is kept in a per-user directory, `$XDG_RUNTIME_DIR/ddf-context-budget` or else `~/.cache/ddf-context-budget`; the script uses it only if it is a real directory (not a symlink) owned by the current user with no group or other permissions, and replaces state files by writing a new file and renaming it, so it never writes through a symlink. It never blocks, and on any error it exits 0 silently.
+The hook runs on `UserPromptSubmit` and `PostToolUse` and only adds context through `hookSpecificOutput.additionalContext`. On either event it warns once when the working context crosses soft, once when it crosses hard, and then once per step share of the room past hard; never on every prompt. The last warned level and size are kept in state, so a drop below a limit (after compaction, for example) re-arms the warning. Hook events from subagents (the input carries `agent_id`) are ignored: they neither receive the warning nor count as warned for the main session. Warning texts name no project, repository or path; the hard text names the closing actions and, only when `DDF_CONTEXT_ROTATE` is `1`, the [rotation](#rotation-in-the-desktop-app) steps and both fallbacks. State is kept in a per-user directory, `$XDG_RUNTIME_DIR/ddf-context-budget` or else `~/.cache/ddf-context-budget`; the script uses it only if it is a real directory (not a symlink) owned by the current user with no group or other permissions, and replaces state files by writing a new file and renaming it, so it never writes through a symlink. It never blocks, and on any error it exits 0 silently.
 
 Save as `ddf-context-budget.mjs` (Node 18 or later):
 
@@ -84,6 +85,7 @@ const HARD_SHARE = share('DDF_CONTEXT_HARD_SHARE', 0.85);
 const STEP_SHARE = share('DDF_CONTEXT_STEP_SHARE', 0.1);
 const ENV_WINDOW = Number(process.env.DDF_CONTEXT_WINDOW) > 0 ? Number(process.env.DDF_CONTEXT_WINDOW) : null;
 const CAP = Number(process.env.DDF_CONTEXT_CAP) > 0 ? Number(process.env.DDF_CONTEXT_CAP) : null;
+const ROTATE = process.env.DDF_CONTEXT_ROTATE === '1';
 // Per-user state directory, never the shared temp directory.
 const STATE = process.env.XDG_RUNTIME_DIR
   ? join(process.env.XDG_RUNTIME_DIR, 'ddf-context-budget')
@@ -196,11 +198,14 @@ try {
 
   const used = `${k(tokens - L.base)} of ${k(L.room)} working room used`;
   const text = level === 2
-    ? `Context budget: hard limit, ${used}. Start no new step. Finish the current step, post the result and the handoff, then rotate when the harness can start sessions (Claude desktop app): `
-      + `1) start one successor with fresh context (never a fork; none if one was already started), not inside this session's worktree, whose brief is only: read AGENTS.md, the mode doc and the newest handoff on the tracking Issue, then continue from its Next section; `
-      + `2) once the result confirms it started, detach it so archiving this session does not archive it; `
-      + `3) give the owner the successor's link in one line, then archive this session. `
-      + `If the start is refused or unavailable, or the successor cannot be detached: answer the owner's questions about the result, then stop without archiving.`
+    ? (ROTATE
+      ? `Context budget: hard limit, ${used}. Start no new step. Finish the current step, post the result and the handoff, then rotate when the harness can start sessions (Claude desktop app): `
+        + `1) start one successor with fresh context (never a fork; none if one was already started), not inside this session's worktree, whose brief is only: read AGENTS.md, the mode doc and the handoff comment you just posted (give its URL, not "the newest"), then continue from its Next section; `
+        + `2) once the result confirms it started, detach it so archiving this session does not archive it; `
+        + `3) give the owner the successor's link in one line; archive this session only if its worktree has no uncommitted or unpushed changes. `
+        + `If the start is refused or unavailable: answer the owner's questions about the result, then stop without archiving (the owner starts the next session). `
+        + `If the successor started but cannot be detached, or unpushed work remains: give the owner the successor's link and the reason, do not archive this session while the successor runs, never ask for another session, then stop.`
+      : `Context budget: hard limit, ${used}. Start no new step. Finish the current step, post the result and the handoff, answer the owner's questions about the result, then stop; the owner starts the next session from the handoff.`)
     : `Context budget: soft limit, ${used}. Advice: at the next checkpoint, if the remaining work is long or a pause will outlast the prompt cache, post a handoff and continue in a new session.`;
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: text } }));
 } catch {}
@@ -223,18 +228,18 @@ Facts used: the Claude Code [hooks](https://code.claude.com/docs/en/hooks) page 
 
 ### Rotation in the desktop app
 
-The Claude desktop app (Code tab) gives a session actions to start, detach and archive sessions; the terminal CLI has none, so a CLI session stops at the hard limit as before. The [rotation rules](../orchestrator/handoff.md#rotation) map to them:
+The Claude desktop app (Code tab) gives a session actions to start, detach and archive sessions; the terminal CLI has none, so a CLI session stops at the hard limit as before. Rotation also needs `DDF_CONTEXT_ROTATE=1`, the operator's standing permission; without it every session stops at the hard limit. The [rotation rules](../orchestrator/handoff.md#rotation) map to them:
 
 | Rule step | Desktop-app action |
 |---|---|
-| start one successor with a fresh context | start a session with a fresh context (not a fork) and a brief that names the tracking Issue and the starting steps; give it its own worktree, or the plain project folder when the ending session has no worktree |
+| start one successor with a fresh context | start a session with a fresh context (not a fork) and a brief that names the URL of the handoff comment just posted and the starting steps; give it its own worktree, or the plain project folder when the ending session has no worktree |
 | confirmed start | the start action's result reports the session as started |
 | release the successor | detach it to top level: a session started by another is otherwise archived together with it when it is idle |
 | tell the owner | one line with the successor's link |
-| end this session | archive this session itself; archiving stops it and, by default, removes its worktree |
+| end this session | archive this session itself, only when its worktree has no uncommitted or unpushed changes; archiving stops it and, by default, removes its worktree |
 
 Fallbacks, observed in the app and not documented:
 
-- **Start refused:** on a turn started by another session's message or an automated event rather than by the owner, the app refuses to start a session; the session may leave a proposal card for the owner instead, and stops.
-- **Detach refused:** a session that shares another session's worktree cannot be detached; this is why the successor never runs inside the ending session's worktree.
+- **Start refused:** on a turn started by another session's message or an automated event rather than by the owner, the app refuses to start a session; the session may leave a proposal card for the owner instead, and stops; the owner starts the next session.
+- **Detach refused:** a session that shares another session's worktree cannot be detached; this is why the successor never runs inside the ending session's worktree. When detach is refused, or unpushed work remains, the owner gets the successor's link and this session stays unarchived.
 - **Archive approval:** the app asks the owner to approve each archive unless the session's permission mode lets it decide alone, and refuses to archive a session that is pinned or still working. Until the owner approves, the ending session waits; nothing else depends on it, since the successor already runs on its own.
