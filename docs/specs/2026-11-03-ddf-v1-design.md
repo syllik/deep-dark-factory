@@ -48,7 +48,7 @@ V1 is done when one operator runs DDF on one host and two pilot projects (DDF it
 | Product | this repository | DDF maintainers | defaults, role prompts, schemas, templates |
 | Operator | a private repo or folder chosen by the operator (`ddf setup` scaffolds it) | the person running DDF | `routing.yaml`, `projects.yaml` (connected projects, forge, **maximum autonomy**, allow-listed humans), limits, notification settings, App IDs |
 | Project | `.ddf/project.yaml` in the target repository, always read from the integration branch | the project | branches, verify commands, required checks, risk rules, sensitive/forbidden paths, hard stops, zones, requested autonomy |
-| Secrets | the read-only `secrets` mount of the control-plane container (§8.1); on the non-container macOS profile `~ddf/.config/ddf/secrets/` mode 0600 on the host | the operator | App private keys, review-signing key, Telegram token, agent CLI tokens and provider keys |
+| Secrets | the read-only `secrets` mount of the control-plane container (§8.1); on the non-container macOS profile `~ddf/.config/ddf/secrets/` on the host (directory 0700, files 0600, §8.1) | the operator | App private keys, review-signing key, Telegram token, agent CLI tokens and provider keys |
 
 Rules:
 - Policy only tightens across layers. A project can never loosen a product invariant; an operator can never loosen a project's policy.
@@ -356,6 +356,7 @@ Two runtime profiles. Both run `ddfd` from a maintainer-promoted DDF ref (§4.4)
 
 - **Linux container profile (reference deployment from V1):** a Linux host; the control plane (`ddfd`, the store, the secrets) runs in a container; a dedicated non-admin host user `ddf` owns its mounts. The control-plane container has three named mounts: `config` (operator config, read-only), `secrets` (read-only) and `data` (store, clones, run logs). It holds the container runtime's socket to start run containers; on a rootful runtime that socket is host-equivalent. Whether the runtime is rootful or rootless is open and decided by the probe spike; this spec holds for both.
 - **macOS colima profile (second runtime profile):** a dedicated non-admin OS user `ddf` with a private home (mode 700); `ddfd` runs from launchd as `ddf`, not in a container. The fixed home-directory locations are the defaults of this non-container profile in place of the mounts: `~ddf/.config/ddf/secrets/` for secrets, `~ddf/work/` and `~ddf/runs/` for data; the operator config is the folder the operator chose (§3). launchd supervises `ddfd`, not the container VM: `ddfd` checks VM health and restarts the VM itself (§8.4); a launchd colima job is only a boot-time starter (`RunAtLoad`, no `KeepAlive`, so it never races `ddfd`'s own restart).
+- On both profiles the host-side locations of `secrets` and `data` (mount sources on the Linux container profile, the `~ddf` defaults on the macOS colima profile) are owned by `ddf` and not readable by any other non-root host user: directories mode 0700, secret files mode 0600, for rootful and rootless runtimes alike.
 - **Weak host:** a host with 1–2 GB of memory orchestrates; heavy verify runs in forge CI. A project's CI may use a self-hosted runner: that is project CI, which DDF only reads as required checks (§8.5); DDF itself needs no runner. Such a runner is ephemeral, isolated and never runs as the control-plane host user.
 
 ### 8.2 GitHub identity
@@ -372,7 +373,7 @@ The token broker mints an installation token per operation, narrowed to one repo
 
 ### 8.3 Workspaces and publication
 
-- Daemon clones live in `~ddf/work/<forge>/<owner>/<repo>`, used only by trusted code, with hooks disabled (`core.hooksPath` to an empty directory, no fsmonitor, no filter drivers).
+- Daemon clones live in the `data` mount (§8.1; macOS colima profile default: `~ddf/work/<forge>/<owner>/<repo>`), used only by trusted code, with hooks disabled (`core.hooksPath` to an empty directory, no fsmonitor, no filter drivers).
 - Each run gets a fresh copy (its own `.git`, no remotes, no credentials). The copy is per run: never shared with the host's working files or another run, reachable only by that run's container, and destroyed with the run cell; it is never a bind mount of a control-plane or host path. The Sandbox port takes it in as content and returns files out (§4.2); how the adapter moves it (an archive stream, or a per-run volume the control plane fills) is the adapter's matter. Read-only for the Planner and reviewers, writable for the Executor; the local gate and `forge-local` CI get the applied tree as content the same way.
 - After the Executor finishes, the adapter's trusted wrapper (not the agent) runs `git add -A && git diff --cached --binary <base>` in the container and writes `/out/change.patch`. The Publisher applies it to the daemon's clean clone with hooks and config neutralised, refuses symlinks, paths outside the repository and any path under `.git/`, and evaluates path policy on the applied tree.
 - **The host never executes repository content.** Verify, the local gate and `forge-local` CI always run in fresh containers. The local gate runs on the applied tree **before** the commit is pushed, so a failing gate produces no forge write. The host never runs an agent CLI against a repository copy, not even `opencode models` or `opencode debug`: opencode loads project plugins on every invocation.
@@ -425,7 +426,7 @@ Agent code runs in the project's CI. A project may be set to `merge-integration`
 | agent authentication failure (§7.3) | global pause (reason `credential`), notify; no automatic lift |
 | host sleep | the daemon's supervisor restarts it; expired leases are released |
 
-**Run logs:** `~ddf/runs/<task>/<run>/` (brief, result, sanitized CLI output), kept 30 days; secrets redacted by pattern and by loaded secret values (§8.4) before writing.
+**Run logs:** in the `data` mount (macOS colima profile default: `~ddf/runs/<task>/<run>/`): brief, result, sanitized CLI output; kept 30 days; secrets redacted by pattern and by loaded secret values (§8.4) before writing.
 
 ## 10. Forge adapters
 
@@ -613,3 +614,5 @@ Answers, evidence and probe definitions: `docs/research/2026-11-m0-facts.md`; de
 - 2026-11-10 Issue #47: §8.4 — per-run egress rule enforced from M3; credentials reach a run only through the credential source, first and later implementations
 - 2026-11-10 Issue #47: §15 — credential and egress risks replaced by the credential-source schedule and the per-adapter egress restriction from M3 (owner decisions 3 and 4 of #43, see .ai/decisions.md)
 - 2026-11-11 Issue #54: §15 — registries and the routed provider endpoint named as a residual exfiltration channel for the in-container credential, accepted on the dedicated account; no method-level registry enforcement planned (see docs/operator/security-model.md#accepted-risks)
+- 2026-11-11 Issue #49: §3, §8.1 — host-side `secrets` and `data` locations owned by `ddf`, directories 0700, secret files 0600, rootful and rootless
+- 2026-11-11 Issue #49: §8.3, §9 — daemon clones and run logs in the `data` mount; `~ddf/work`, `~ddf/runs` are macOS colima profile defaults

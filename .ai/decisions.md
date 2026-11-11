@@ -191,6 +191,7 @@ Source: Issue #54, DDF review r2 @ 2c01f56 on PR #53, findings r2-1 and r2-2. Sp
 - 2026-11-11 AGENT-DEFAULT: Do the adapter docs name an environment variable or endpoint for the per-run token? → No. They say only that a pay-per-token entry receives the per-run token from the credential source, never the real key, and is unusable until that implementation exists; the delivery details are decided with the implementation. Task: #54.
 - 2026-11-11 AGENT-DEFAULT: Does spec §8.4 (Egress per run, Redaction) change as well? → No. The residual channel is named only in §15 and security-model.md Accepted risks, as the Issue asks; §8.4 already states host-level egress and redaction correctly. Task: #54.
 - 2026-11-11 AGENT-DEFAULT: Do docs/concepts/routing.md and identity.md get the same residual-channel wording? → No. They are outside #54's file list and are edited by the parallel task #49; routing.md's Accepted schedule already matches the credential rule. Task: #54.
+- 2026-11-11 AGENT-DEFAULT: The new rule 'directories 0700' contradicts existing text calling the `~ddf/.config/ddf/secrets/` directory 'mode 0600'; fix the contradiction beyond the three places the Issue names? → Yes, in spec section 3 Secrets row, config-layers.md Secrets row, identity.md Host secrets bullet and setup.md Secrets layout paragraph; the security-model.md secrets table row is left to #54. Task: #49.
 
 ## 2026-11-11 Auto-rotation at the hard context limit (Issue #57)
 
