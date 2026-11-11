@@ -74,7 +74,7 @@ All secrets live in the read-only `secrets` mount (macOS colima profile: `~ddf/.
 | GitHub App private keys (`worker`, `review-correctness`, `review-security`) | token broker on the host | never |
 | Review-signing key (HMAC) | daemon only | never |
 | Telegram bot token | `notify-telegram` | never |
-| Agent CLI tokens and provider keys | agent adapters | yes, only the routed adapter's credential: a subscription token that cannot be proxied, an accepted risk ([security-model.md](security-model.md#accepted-risks)), or for a pay-per-token provider entry the per-run token from the credential source, never the real key; such an entry is unusable until the per-run token implementation of the credential source exists |
+| Agent CLI tokens and provider keys | agent adapters | yes, only the routed adapter's credential: a subscription token that cannot be proxied, an accepted risk ([security-model.md](security-model.md#accepted-risks)), or for a pay-per-token provider entry the per-run token from the credential source, never the real key; the operator does not load such a key until the per-run token implementation of the credential source exists ([§15](security-model.md#accepted-risks)) |
 
 Exact file names are fixed by `ddf setup` in M5.
 
