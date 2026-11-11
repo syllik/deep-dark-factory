@@ -19,7 +19,7 @@ V1 is done when one operator runs DDF on one host and two pilot projects (DDF it
 - Telegram and CLI as the operator channel;
 - documentation that any LLM orchestrator session can follow, with or without the daemon.
 
-**Out of scope (V1):** promotion to production and deploys; dashboards and GitHub Projects sync; pinned status issue (V1.1); webhooks; multi-host workers; egress allow-listing; GitLab/Gitea/Forgejo adapters; Codex CLI adapter; an Auditor role; free-form tasks via Telegram.
+**Out of scope (V1):** promotion to production and deploys; dashboards and GitHub Projects sync; pinned status issue (V1.1); webhooks; multi-host workers; GitLab/Gitea/Forgejo adapters; Codex CLI adapter; an Auditor role; free-form tasks via Telegram.
 
 ## 2. Maintainer decisions (2026-11-03)
 
@@ -74,8 +74,8 @@ Rules:
 
 | Port | V1 adapters | Contract (operations) |
 |---|---|---|
-| Forge | `forge-local`, `forge-github` | list candidate tasks; read intake actor; create task (with task-key marker); find change by task key; publish change; update change body; update branch from base; read checks for a head; rerun checks; post review; read answers and their authors; merge pinned to a head SHA; revert; close/reopen task; set projection labels. Every write supports **dry-run** (logged, not performed). |
-| Agent | `agent-claude-code`, `agent-opencode` | `run(role, brief, workspace, limits) → result` validated against the role schema (§7.3) |
+| Forge | `forge-local`, `forge-github` | list candidate tasks; read intake actor; create task (with task-key marker); find change by task key; publish change; update change body; update branch from base; read checks for a head; rerun checks; post review; read answers and their authors; merge pinned to a head SHA; revert; close/reopen task; set projection labels. Every write supports **dry-run** (logged, not performed). The port takes one or more reviewer identities; the core does not fix their number (the GitHub three-App set, §8.2, is unchanged). |
+| Agent | `agent-claude-code`, `agent-opencode` | `run(role, entry, brief, workspace, limits, credentialSource) → (result, patch, usage)` or exactly one failure class: `credential`, `rate-limited` (with a reset time), `retryable` or `fatal`; the result is validated against the role schema (§7.3) |
 | Sandbox | `sandbox-docker` (container runtime per runtime profile, §8.1), `sandbox-fake` | create a run cell (container plus any volume or network it needs) labelled with task key and run ID, with limits and network rules; put content in (brief, role bundle, workspace copy); run; get files out (`result.json`, `change.patch`); kill; list resources by label (task key, run ID); destroy by task key, then verify by listing that nothing with that key remains; report host capacity (CPU, memory, disk). No operation takes a host path; how content moves is the adapter's matter (§8.3). An unverifiable teardown is a reported failure (journal + notification), never silent. |
 | Notify | `notify-cli`; `notify-telegram` deferred to V1.1 | send event; receive owner answers and commands with sender identity |
 | Secrets | `secrets-file` | read a named secret |
@@ -249,6 +249,7 @@ verify:                              # run inside containers only
 checks:
   required: [verify]                 # forge check names the gate requires
 image: .ddf/Dockerfile               # optional; default base image otherwise
+registries: [registry.npmjs.org]     # verify runs `npm ci`; omit when the image carries the dependencies
 risk:
   lowMaxLines: 200
   docs: ["docs/**", "**/*.md"]
@@ -268,6 +269,8 @@ change:
 reviewers:
   r2DifferentProvider: false         # require R2 on a different provider than the Executor
 ```
+
+Project dependencies come from the project image (`image`) by default. A project whose verify installs at run time lists the registry hosts in the top-level key `registries` (unique host names, no scheme, path or port; default none). Those hosts join the egress allow-list of that project's Executor, local-gate and `forge-local` CI containers (§8.4). `.ddf/**` is a forbidden path (§6.5), so only a human-merged change can add a registry.
 
 In `change.branch`, `{type}` is the Conventional Commits type of the change (`feat`, `fix`, `docs`, `refactor`, `test`, `ci`, `chore`), `{n}` the task number and `{slug}` a short kebab-case slug.
 
@@ -293,34 +296,57 @@ Reviewers judge the diff, the spec and the CI results; they do not execute repos
 ```yaml
 # <operator-config>/routing.yaml — model names are examples
 tiers:
-  deep:     [{adapter: claude-code, model: opus-5.5, effort: high}]
-  standard: [{adapter: claude-code, model: opus-5.5, effort: medium},
-             {adapter: opencode, model: <provider/model>}]   # fallback on rate limit
-  routine:  [{adapter: claude-code, model: sonnet-5.5, effort: medium}]
-  fast:     [{adapter: claude-code, model: haiku-5.5, effort: low}]
+  deep:     [{adapter: claude-code, provider: anthropic, model: opus-5.5, effort: high}]
+  standard: [{adapter: claude-code, provider: anthropic, model: opus-5.5, effort: medium},
+             {adapter: opencode, provider: <provider>, model: <provider/model>}]   # fallback on rate limit
+  routine:  [{adapter: claude-code, provider: anthropic, model: sonnet-5.5, effort: medium}]
+  fast:     [{adapter: claude-code, provider: anthropic, model: haiku-5.5, effort: low}]
 roles:
-  r2: {prefer: [{adapter: opencode, model: <other-provider/model>}]}   # optional
+  r2: {prefer: [{adapter: opencode, provider: <other-provider>, model: <other-provider/model>}]}   # optional
 limits:
   # capacity: operator override of the host capacity reported by the Sandbox port; key and schema land with Issue #34
   # maxConcurrentContainers: 2   # optional operator cap, no default; every container counts: Executor, each reviewer, local gate, forge-local CI
   maxSubagentsPerRun: 3          # advisory, passed to the agent; not enforceable by the CLIs
 ```
 
+A routing entry has `adapter`, `provider`, `model` and optional `effort`. `provider` is required (pattern `^[a-z][a-z0-9-]*$`) and names the model provider the entry calls. DDF compares only this field and never derives it from `model`. With `reviewers.r2DifferentProvider: true`, R2 uses only entries whose `provider` differs from the `provider` of the entry that ran the Executor for the reviewed head. Adapter and model are not compared. With no such entry, the no-entry-left rule below applies.
+
 Entries are tried in order. A rate-limited entry is marked cooling until its reset time; the next entry of the tier is used; with no entry left the task waits and one notification is sent. The scheduler admits runs against the host capacity (CPU, memory, disk) reported by the Sandbox port; an operator setting in `limits` overrides the reported values (its key and schema land with the sizing rule, Issue #34). Per-run limits come from that sizing rule. `limits.maxConcurrentContainers` is an optional operator cap, not the scheduling input. Container limits must fit the resources of the container runtime; `ddf status` reports a misfit.
 
 ### 7.3 Agent adapter contract
 
+**Port level.** Every agent adapter implements `run(role, entry, brief, workspace, limits, credentialSource) → (result, patch, usage)` or returns exactly one failure class.
+
+- Inputs: the role; the routing entry (`provider`, `model`, `effort`, §7.2); the brief; the workspace content (the run's workspace copy, read-only for the Planner and reviewers, §8.3); limits (wall-clock timeout, `maxSubagentsPerRun` as advice, optional `maxCostUsd`); the credential source.
+- Outputs: the result, validated against `schemas/<role>.result.json`; for the Executor, the patch made by the trusted wrapper (§8.3); usage (model ID, tokens, cost), recorded in the journal.
+- Exactly one failure class, chosen by the adapter:
+  - `credential`: global pause with reason `credential` (§9), never retried. This includes a credential source that yields nothing or an empty value. The adapter checks for that before any provider call.
+  - `rate-limited` with a reset time: the entry cools until that time, then the next entry is used (§7.2).
+  - `retryable`: backoff on the same entry, not fallback.
+  - `fatal`: a failed run within the §5.3 bounds. This covers a missing or invalid result and a timeout.
+- **Credential source.** The adapter receives its credential through a credential source, a broker interface; the core never passes the credential as a value. The adapter receives only the routed entry's credential. The first implementation returns the routed entry's stored credential from the Secrets port, as today. A later implementation can return a per-run token that is valid only against a control-plane endpoint proxying the provider, with no port change (§8.4). Accepted schedule (§15): run-container egress is restricted per adapter in M3; no real pay-per-token provider key enters a run container, because the per-run token implementation is in place before the first pay-per-token key is loaded; subscription tokens that cannot be proxied stay visible inside their routed adapter's container, an accepted risk on a dedicated account, and publishing any of them stays not accepted (§8.4 redaction).
+- Every call uses the entry's model, never an adapter default or a free fallback model.
+- The adapter loads no repository-controlled agent configuration. Project instructions (`AGENTS.md`) reach the agent only through the brief, read from the integration branch.
+- Role prompts live once in `prompts/`; each adapter renders them into its native form in a directory outside the workspace.
+- All agent-originated output passes the redaction of §8.4 before any forge write or notification.
+- Optional per-task `maxCostUsd` for API-key-billed entries. No per-stage human grants and no per-call USD reservations.
+
+**CLI-in-container profile.** These rules apply only to an adapter that runs a CLI inside the run container. `agent-claude-code` and `agent-opencode` implement this profile.
+
 - Non-interactive CLI inside the container, as a non-root user (`claude -p --output-format json …`, `opencode run --format json --agent … -m …`). Permission prompts are disabled inside the container; the container is the security boundary.
 - **Pinned CLIs.** Claude Code from npm `@anthropic-ai/claude-code`; opencode from npm `opencode-ai`, 1.x line (verified 1.19.5). opencode's GitHub-release 2.x line has incompatible flags and config schema and is not supported in V1. The base image records exact versions; the adapter refuses an unknown version.
-- **Configuration comes only from DDF.** The adapter starts the CLI with DDF's rendered role bundle as the only settings source: project and user settings, hooks, MCP servers and plugins from the workspace are disabled. Project instructions (`AGENTS.md`) reach agents only through the brief, read from the integration branch. Isolation switches (exact command lines in `docs/research/2026-11-m0-facts.md`): Claude Code `--setting-sources ''` with `--settings <bundle>` and `--strict-mcp-config --mcp-config <bundle>`, brief on stdin; `--tools` restricts built-in tools for reviewers but is not isolation; `--bare` is unusable with a subscription token. opencode: the `OPENCODE_*` environment set from the research doc plus `--pure`. Residual Claude Code sources these flags do not disable: account-synced remote settings (applied regardless of local flags) and built-in plugins and agents; DDF therefore uses a dedicated account and token, and the M3 probe `claude-config-isolation` fails closed if the remote settings carry hooks, permissions or MCP servers.
-- **No run-time installs.** The base image pre-installs opencode's plugin SDK at a pinned version; a run in which any package-registry install happens at run time fails (M3 probes `cli-version-pin`, `agent-home-state`).
-- Each container receives only the credential of its routed adapter. All agent-originated output passes the redaction of §8.4 before any forge write or notification.
-- Every call passes an explicit model from routing (never a CLI default or a free fallback model) and runs under a wall-clock timeout.
-- Failures are classified from `is_error`, `api_error_status` and the assistant `error` field (Claude Code; never from `subtype`) or the `error` event's `statusCode`/`isRetryable` (opencode): authentication failure → credential failure (§9), never retried; rate limit → the next routing entry (§7.2). Deterministic rules: a Claude Code `result` starting with "Not logged in", or a non-zero exit with no `api_error_status` and authentication text, is a credential failure; only HTTP 429 is a rate limit; other retryable errors (5xx) → backoff on the same entry, not fallback. Before starting a CLI the adapter checks that the routed credential is present and non-empty; a missing or empty credential is a credential failure (§9), never a failed run (a missing provider key otherwise surfaces as an opaque error).
-- Inputs mounted read-only: brief, role bundle. Outputs: `/out/result.json` (validated against `schemas/<role>.result.json`; missing or invalid → failed run) and, for the Executor, `/out/change.patch`.
-- The adapter records model ID, token usage and cost from the CLI output into the journal.
-- Role prompts live once in `prompts/`; each adapter renders them into the CLI's native form (Claude Code system prompt and agent files; opencode agent config) in a directory outside the workspace.
-- Optional per-task `maxCostUsd` for API-key-billed entries. No per-stage human grants and no per-call USD reservations.
+- **Configuration comes only from DDF.** The adapter starts the CLI with DDF's rendered role bundle as the only settings source: project and user settings, hooks, MCP servers and plugins from the workspace are disabled. Isolation switches (exact command lines in `docs/research/2026-11-m0-facts.md`): Claude Code `--setting-sources ''` with `--settings <bundle>` and `--strict-mcp-config --mcp-config <bundle>`, brief on stdin; `--tools` restricts built-in tools for reviewers but is not isolation; `--bare` is unusable with a subscription token. opencode: the `OPENCODE_*` environment set from the research doc plus `--pure`. Residual Claude Code sources these flags do not disable: account-synced remote settings (applied regardless of local flags) and built-in plugins and agents; DDF therefore uses a dedicated account and token, and the M3 probe `claude-config-isolation` fails closed if the remote settings carry hooks, permissions or MCP servers.
+- **Credential delivery.** The adapter takes the routed credential from the credential source and delivers it into the container as environment; the container holds only that credential.
+- **No run-time installs** of the agent CLI and its own packages. The base image pre-installs the CLIs and opencode's plugin SDK at pinned versions; a run in which the CLI or its own packages are installed from a registry at run time fails (M3 probes `cli-version-pin`, `agent-home-state`). Project dependencies come from the project image (`image`) by default, or from the project's declared `registries` (§6.7).
+- Inputs mounted read-only: brief, role bundle. Outputs: `/out/result.json` (the result) and, for the Executor, `/out/change.patch` (the patch).
+- Every CLI call passes the entry's model explicitly (never a CLI default) and runs under the wall-clock timeout.
+- Usage (model ID, token usage, cost) is parsed from the CLI output.
+- Each adapter renders the role prompts into the CLI's native form (Claude Code system prompt and agent files; opencode agent config).
+- **Failure classification** maps CLI signals onto the four port-level classes. Fields read: Claude Code `is_error`, `api_error_status` and the assistant `error` field, never `subtype`; opencode `error` event `statusCode`/`isRetryable`.
+  - `credential`: authentication signals, meaning `authentication_failed`, a Claude Code `result` starting with "Not logged in", a non-zero exit with no `api_error_status` and authentication text, or opencode 401/403. A missing or empty credential is checked before the CLI starts (it otherwise surfaces as an opaque error).
+  - `rate-limited`: HTTP 429 only.
+  - `retryable`: other retryable errors (5xx, `overloaded`, `isRetryable: true`).
+  - `fatal`: everything else (opencode `UnknownError` with the stderr log attached, other non-zero exits, missing or invalid `/out/result.json`, timeout).
 
 ## 8. Identity, secrets and isolation
 
@@ -364,7 +390,8 @@ The token broker mints an installation token per operation, narrowed to one repo
 - **Linux container profile:** provides the properties through the runtime's per-container options and network rules; how exactly is decided by the probe spike together with rootful or rootless.
 - **macOS colima profile:** colima firewall rules, applied via `colima ssh`, are this profile's way to provide "no route". On colima, firewall rules inside the VM drop container traffic to the VM's gateway to the host loopback and to the VM itself, except DNS; containers reach only the internet. The rules do not survive a VM restart. The daemon applies them (`colima ssh -- sudo …`) after every VM start or recreation; colima provision hooks may add an early layer but are never the guarantee. Before every container start the daemon checks that the rules exist and runs the host-reachability probe; on failure it follows the precedence above. Rules found missing while no VM restart was observed (VM boot ID, this profile's runtime instance identifier, unchanged since the daemon last applied them) are a tamper signal: global pause with reason `security` (§9), no automatic lift. If the VM is down, `ddfd` restarts it as `ddf` (`colima start`, bounded attempts), then applies and probes the rules. The probe also holds in §14.1.
 - Services (databases, browsers) run inside the container.
-- Network egress to the internet is open in V1 (model APIs, package registries) — accepted risk.
+- **Egress per run**, enforced from M3 by each runtime profile's own mechanism: an agent run reaches the provider endpoint of its routed adapter; Executor runs, the local gate and `forge-local` CI also reach the project's declared `registries` (§6.7); nothing else. DNS behaves as in the isolation properties. Before M3 this restriction is not yet enforced (§15).
+- **Credential source.** Credentials reach a run only through the credential source, the broker interface of the Agent port (§7.3); the core never passes a credential as a value. The first implementation returns the routed entry's stored credential from the Secrets port, as today. A later implementation can return a per-run token that is valid only against a control-plane endpoint proxying the provider, with no port change.
 - **Redaction before publication.** Before every forge write and every notification send, all agent-originated text (review projection comments, change body, commit message, patch content, Telegram messages) is redacted by secret patterns and by the exact values of the secrets loaded into that run's container. A patch containing a loaded secret value is refused: hard stop `secrets` (§6.4), failed run.
 
 ### 8.5 CI prerequisites for autonomous projects
@@ -500,8 +527,8 @@ Each milestone gets its own implementation plan.
 
 ## 15. Accepted risks (V1)
 
-- Agent CLI tokens and provider keys are visible inside containers (each container holds only its routed adapter's credential). Publishing them is not accepted: §8.4 redaction and secret-value scanning apply.
-- Network egress from containers is not filtered.
+- A run container holds only the credential of its routed adapter, received through the credential source (§8.4). A real pay-per-token provider key never enters a run container: the per-run token implementation of the credential source is in place before the first pay-per-token key is loaded. Agent CLI subscription tokens that cannot be proxied stay visible inside their routed adapter's container; this is an accepted risk, on a dedicated account. Publishing any of them is not accepted (§8.4 redaction).
+- Run-container egress is restricted per adapter from M3 (§8.4): an agent run reaches only its routed adapter's provider endpoint, and Executor runs, the local gate and `forge-local` CI also reach the project's declared registries. Before M3 this restriction is not yet enforced.
 - IPv6 egress is not filtered in V1; the isolation probe fails if a container gets a global IPv6 route.
 - The host is a workstation: availability depends on it being on.
 - Private repositories on plans without rulesets have no forge-side protection; there the merge gate is the only enforcement.
@@ -577,3 +604,10 @@ Answers, evidence and probe definitions: `docs/research/2026-11-m0-facts.md`; de
 - 2026-11-10 Issue #46: §8.3 — per-run copy rule reconciled: never shared, never a host or control-plane bind mount, transport is the adapter's matter
 - 2026-11-10 Issue #46: §8.4 — containers labelled with task key and run ID; fixed 3 GB RAM, 2 CPU defaults removed, limits from the sizing rule (Issue #34)
 - 2026-11-10 Issue #46: §9 — single recovery rule by label: terminal or unknown task → destroy, verify, record; non-terminal → V1 kill and discard
+- 2026-11-10 Issue #47: §1 — the egress item removed from the Out of scope list; per-run egress is specified in §8.4
+- 2026-11-10 Issue #47: §4.2 — Agent port signature `run(role, entry, brief, workspace, limits, credentialSource) → (result, patch, usage)` with four failure classes; Forge port takes one or more reviewer identities, the core does not fix their number
+- 2026-11-10 Issue #47: §6.7 — `registries` example key; project dependencies come from `image` by default, declared registries join the egress allow-list of Executor, local-gate and `forge-local` CI containers
+- 2026-11-10 Issue #47: §7.2 — routing entries carry a required `provider`; `reviewers.r2DifferentProvider` compares only `provider`
+- 2026-11-10 Issue #47: §7.3 — split into Port level (signature, inputs, outputs, failure classes `credential`, `rate-limited`, `retryable`, `fatal`, credential source) and CLI-in-container profile (CLI rules, credential delivery, CLI error mapping); no-run-time-installs scoped to the agent CLI and its own packages
+- 2026-11-10 Issue #47: §8.4 — per-run egress rule enforced from M3; credentials reach a run only through the credential source, first and later implementations
+- 2026-11-10 Issue #47: §15 — credential and egress risks replaced by the credential-source schedule and the per-adapter egress restriction from M3 (owner decisions 3 and 4 of #43, see .ai/decisions.md)

@@ -18,6 +18,7 @@ Schema (canonical): [`schemas/project.json`](../../schemas/project.json) (`ddf.p
 | `verify` | list of non-empty strings, min 1 | yes | none |
 | `checks.required` | list of non-empty strings, min 1 | no | none |
 | `image` | string, non-empty | no | none (default base image) |
+| `registries` | list of unique host names (no scheme, path or port) | no | none |
 | `risk.lowMaxLines` | integer ≥ 0 | no | 200 |
 | `risk.docs` | list of globs | no | none |
 | `risk.sensitive` | list of globs | no | none |
@@ -80,10 +81,22 @@ checks:
 
 ### `image`
 
-Optional container build file for runs of this project. Without it the default base image is used ([sandbox-docker.md](../adapters/sandbox-docker.md)).
+Optional container build file for runs of this project. Without it the default base image is used ([sandbox-docker.md](../adapters/sandbox-docker.md)). Project dependencies come from the project image by default.
 
 ```yaml
 image: .ddf/Dockerfile
+```
+
+### `registries`
+
+Registry host names (no scheme, path or port; unique) that a verify installing at run time needs. Default none. Project dependencies come from the project image (`image`) by default; a project whose verify installs at run time lists the registry hosts here. Those hosts join the egress allow-list of this project's Executor, local-gate and `forge-local` CI containers.
+
+Egress per run, enforced from M3 by each runtime profile's own mechanism: an agent run reaches the provider endpoint of its routed adapter; Executor runs, the local gate and `forge-local` CI also reach the declared registries; nothing else ([spec §8.4](../specs/2026-11-03-ddf-v1-design.md#84-containers)). Planner and reviewer runs execute no commands and reach only their routed adapter's provider endpoint. The no-run-time-installs rule covers only the agent CLI and its own packages, not project dependencies.
+
+`.ddf/**` is a forbidden path ([policy.md](../concepts/policy.md#forbidden-paths)), so only a human-merged change can add a registry.
+
+```yaml
+registries: [registry.npmjs.org]   # verify runs `npm ci`; omit when the image carries the dependencies
 ```
 
 ### `risk`
@@ -159,7 +172,7 @@ change:
 
 ### `reviewers.r2DifferentProvider`
 
-Default `false`. When `true`, R2 must run on a different provider than the Executor ([routing.md](../concepts/routing.md#selection-and-fallback)).
+Default `false`. When `true`, R2 must run on a different provider than the Executor: R2 uses only routing entries whose `provider` differs from the `provider` of the entry that ran the Executor for the reviewed head. Adapter and model are not compared. With no such entry, the no-entry-left rule applies ([routing.md](../concepts/routing.md#selection-and-fallback), [config-reference.md](../operator/config-reference.md#entry)).
 
 ```yaml
 reviewers:

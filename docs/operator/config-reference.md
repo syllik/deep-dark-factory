@@ -38,8 +38,11 @@ Entries are tried in order; a rate-limited entry (HTTP 429 only) cools until its
 | Key | Type | Required | Default | Allowed values |
 |---|---|---|---|---|
 | `adapter` | string | yes | none | pattern `^[a-z][a-z0-9-]*$`; V1 adapters: `claude-code`, `opencode` |
+| `provider` | string | yes | none | pattern `^[a-z][a-z0-9-]*$`; the model provider the entry calls |
 | `model` | string | yes | none | non-empty; provider model identifier (`opencode`: `<provider>/<model>`) |
 | `effort` | string | no | none | `low` \| `medium` \| `high` |
+
+`provider` names the model provider the entry calls. DDF compares only this field and never derives it from `model`. With `reviewers.r2DifferentProvider: true` ([project-yaml-reference.md](../project/project-yaml-reference.md#reviewersr2differentprovider)), R2 uses only entries whose `provider` differs from the `provider` of the entry that ran the Executor for the reviewed head; adapter and model are not compared. With no such entry, the no-entry-left rule applies ([routing.md](../concepts/routing.md#selection-and-fallback)).
 
 ### `roles`
 
@@ -66,12 +69,12 @@ The operator override for host capacity (a setting in routing `limits` that repl
 # Model names are EXAMPLES only.
 tiers:
   deep:
-    - {adapter: claude-code, model: example-model-a, effort: high}
+    - {adapter: claude-code, provider: example-provider-a, model: example-model-a, effort: high}
   standard:
-    - {adapter: claude-code, model: example-model-a, effort: medium}
-    - {adapter: opencode, model: "<provider/model>"}   # fallback on rate limit
+    - {adapter: claude-code, provider: example-provider-a, model: example-model-a, effort: medium}
+    - {adapter: opencode, provider: example-provider-b, model: "<provider/model>"}   # fallback on rate limit
 roles:
-  r2: {prefer: [{adapter: opencode, model: "<other-provider/model>"}]}
+  r2: {prefer: [{adapter: opencode, provider: example-provider-c, model: "<other-provider/model>"}]}
 limits:
   maxConcurrentContainers: 2   # optional cap; omit to use the host capacity only
   maxSubagentsPerRun: 3
