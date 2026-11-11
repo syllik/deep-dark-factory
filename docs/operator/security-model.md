@@ -47,7 +47,7 @@ From [spec §8](../specs/2026-11-03-ddf-v1-design.md#8-identity-secrets-and-isol
 | GitHub App private keys | the read-only `secrets` mount (macOS colima profile: `~ddf/.config/ddf/secrets/`, mode 0600) | never |
 | Review-signing key | same | never |
 | Telegram bot token | same | never |
-| Agent CLI tokens and provider keys | same | yes, only the routed adapter's credential: a subscription token that cannot be proxied (accepted risk below), or for a pay-per-token provider entry the per-run token from the credential source, never the real key; such an entry is unusable until the per-run token implementation of the credential source exists |
+| Agent CLI tokens and provider keys | same | yes, only the routed adapter's credential: a subscription token that cannot be proxied (accepted risk below), or for a pay-per-token provider entry the per-run token from the credential source, never the real key; the operator does not load such a key until the per-run token implementation of the credential source exists ([accepted risks](#accepted-risks)) |
 
 Run logs are written with secrets redacted by pattern and by loaded secret values (§8.4). The journal records the App, permission set and token expiry per action, never the token.
 
