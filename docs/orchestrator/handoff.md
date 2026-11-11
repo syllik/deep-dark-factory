@@ -45,12 +45,25 @@ An interactive session re-sends its whole context on every turn. Prompt caching 
 | Limit | Example share of the room | Action |
 |---|---|---|
 | soft | 0.6 | advice: at the next checkpoint, rotate (post a handoff; the work continues in a new session started from it) when the remaining work is long or a pause will outlast the prompt cache |
-| hard | 0.85, then again every 0.1 of the room past it | start no new step; finish the current one, then only the closing actions: post the result, post the handoff, answer the owner's questions about the result; then stop |
+| hard | 0.85, then again every 0.1 of the room past it | start no new step; finish the current one, then only the closing actions: post the result, post the handoff, then [rotate](#rotation) when the harness can; otherwise answer the owner's questions about the result and stop |
 
 - The shares in the table are an example, not a default the rules depend on; the operator chooses them. How a harness measures the context size, the window and the baseline: [Claude Code](../adapters/agent-claude-code.md#interactive-sessions).
 - A task whose required reading exceeds the budget is split in its brief before it starts.
 - Auto-compaction is not a substitute: it keeps the session going with a summary the session did not write.
 - Daemon runs are out of scope: each run is a fresh process with a bounded brief ([agent-claude-code.md](../adapters/agent-claude-code.md#contract)).
+
+### Rotation
+
+At the hard limit, once the result and the handoff are posted, a session whose harness can start sessions rotates by itself instead of waiting for the owner to start the next one. The owner's standing permission for it is kept in the operator's own agent settings, not in DDF; without it, or when the harness cannot start sessions, the session stops as the hard row says.
+
+- **One successor.** Exactly one, started once. The repeated hard warning past the limit never starts a second one.
+- **Fresh context.** The successor never gets a copy of this conversation: a copy carries the context the rotation exists to drop. Its brief names only the tracking Issue and the [starting steps](#starting-from-a-handoff); the handoff carries the state.
+- **Own checkout.** The successor works in its own checkout or worktree, never in the ending session's worktree: ending a session may remove its worktree.
+- **Order.** Start the successor; only after the harness confirms it started, release it from this session (so that ending this session does not end it too); tell the owner, in one line, where the successor is; then end this session.
+- **Fallback.** If the start is refused or unavailable, or the successor cannot be released, the session does not end itself: it answers the owner's questions about the result and stops. The owner starts the next session from the handoff, as without rotation.
+- The soft limit never rotates by itself.
+
+How a harness starts, releases and ends sessions: [Claude Code](../adapters/agent-claude-code.md#rotation-in-the-desktop-app).
 
 ## Starting from a handoff
 

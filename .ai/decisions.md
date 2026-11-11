@@ -182,3 +182,11 @@ Source: Issue #47, owner decisions 3 and 4 of #43. Spec §1, §4.2, §6.7, §7.2
 - 2026-11-10 AGENT-DEFAULT: Do the spec example, the schema example and the starter template declare a registry, given that their verify runs `npm ci`? → Yes. Each gets `registries: [registry.npmjs.org]` with a comment that a project whose image carries its dependencies omits the key. Task: #47.
 - 2026-11-10 AGENT-DEFAULT: How is the owner's schedule 'no real provider key inside a run container before the first pay-per-token key is loaded' worded? → A real pay-per-token provider key never enters a run container: the per-run token implementation of the credential source is in place before the first pay-per-token key is loaded. Subscription tokens that cannot be proxied stay an accepted risk on a dedicated account. Task: #47.
 - 2026-11-10 AGENT-DEFAULT: Where are this change's decisions recorded? → A new section '## <date> Agent port, routing provider and egress scope (Issue #47)', appended at the end of `.ai/decisions.md`. It has a Source line (Issue #47, owner decisions 3 and 4 of #43) and one AGENT-DEFAULT line per default. Task: #47.
+
+## 2026-11-11 Auto-rotation at the hard context limit (Issue #57)
+
+Source: Issue #57, owner request in the session chat.
+
+- 2026-11-11 At the hard context limit, after the result and the handoff are posted, an interactive session whose harness can start sessions rotates by itself: one successor with a fresh context in its own checkout, started, confirmed, released from the ending session, reported to the owner, then the ending session ends itself. Any refusal falls back to the previous behaviour (stop without ending the session). The soft limit stays advice. The owner's standing permission lives in the operator's agent settings, not in DDF. Rules: `docs/orchestrator/handoff.md#rotation`; desktop-app mapping and hook text: `docs/adapters/agent-claude-code.md#rotation-in-the-desktop-app`. Task: #57.
+- 2026-11-11 AGENT-DEFAULT: Does the successor inherit the ending session's model? → Not by these rules: its tier follows routing like any session; the rotation rules do not name a tier. Task: #57.
+- 2026-11-11 AGENT-DEFAULT: What happens when the hard warning repeats past the limit after a successor was started? → Nothing new: exactly one successor per session; the repeat never starts a second one. Task: #57.
