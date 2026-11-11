@@ -67,7 +67,7 @@ Every key, type and default: [config-reference.md](config-reference.md). Model n
 
 ## Secrets layout
 
-All secrets live in the read-only `secrets` mount (macOS colima profile: `~ddf/.config/ddf/secrets/`, owned by `ddf`, mode 0600), and are read by name through the `secrets-file` adapter. They are never committed and never referenced by value from `routing.yaml` or `projects.yaml`.
+All secrets live in the read-only `secrets` mount (macOS colima profile: `~ddf/.config/ddf/secrets/`, owned by `ddf`, directory 0700, files 0600), and are read by name through the `secrets-file` adapter. They are never committed and never referenced by value from `routing.yaml` or `projects.yaml`. On both profiles the host-side locations of `secrets` and `data` (mount sources on the Linux container profile, the `~ddf` defaults on the macOS colima profile) are owned by `ddf` and not readable by any other non-root host user: directories mode 0700, secret files mode 0600, for rootful and rootless runtimes alike.
 
 | Secret | Used by | Enters containers |
 |---|---|---|
