@@ -19,7 +19,8 @@ Two runtime profiles; both run `ddfd` from a maintainer-promoted DDF ref and giv
 - **Linux container profile** (reference deployment from V1): a Linux host; the control plane (`ddfd`, the store, the secrets) runs in a container; a dedicated non-admin host user `ddf` owns its mounts: `config` (read-only), `secrets` (read-only) and `data` (store, clones, run logs) ([config-layers.md](config-layers.md#layers)). The control-plane container holds the container runtime's socket to start run containers; on a rootful runtime that socket is host-equivalent, which is why rootful or rootless is open until the probe spike decides it. Everything here holds for both.
 - **macOS colima profile** (second runtime profile): a dedicated non-admin OS user `ddf` with a private home (mode 700); `ddfd` runs from launchd as `ddf`, not in a container. launchd supervises `ddfd`, not the container VM: `ddfd` checks VM health and restarts the VM itself; a launchd colima job is only a boot-time starter (`RunAtLoad`, no `KeepAlive`, so it never races `ddfd`'s own restart).
 - The operator's own home directory and personal forge login are not accessible.
-- Secrets live in the `secrets` mount (on the macOS colima profile `~ddf/.config/ddf/secrets/` mode 0600); never in Git ([config-layers.md](config-layers.md)).
+- Secrets live in the `secrets` mount (on the macOS colima profile `~ddf/.config/ddf/secrets/`, directory 0700, files 0600); never in Git ([config-layers.md](config-layers.md)).
+- On both profiles the host-side locations of `secrets` and `data` (mount sources on the Linux container profile, the `~ddf` defaults on the macOS colima profile) are owned by `ddf` and not readable by any other non-root host user: directories mode 0700, secret files mode 0600, for rootful and rootless runtimes alike.
 - A 1–2 GB host orchestrates; heavy verify runs in forge CI. A project's self-hosted CI runner is project CI, which DDF only reads as required checks; DDF itself needs no runner, and such a runner is ephemeral, isolated and never runs as the control-plane host user.
 
 Rationale: [spec §8.1](../specs/2026-11-03-ddf-v1-design.md#81-host).
@@ -45,7 +46,7 @@ Rationale: [spec §8.2](../specs/2026-11-03-ddf-v1-design.md#82-github-identity)
 
 ## Workspaces and publication
 
-1. Daemon clones live in `~ddf/work/<forge>/<owner>/<repo>`, used only by trusted code, with hooks disabled (`core.hooksPath` to an empty directory, no fsmonitor, no filter drivers).
+1. Daemon clones live in the `data` mount (macOS colima profile default: `~ddf/work/<forge>/<owner>/<repo>`), used only by trusted code, with hooks disabled (`core.hooksPath` to an empty directory, no fsmonitor, no filter drivers).
 2. Each run gets a fresh copy (its own `.git`, no remotes, no credentials). The copy is per-run, never shared with the host's working files or another run, reachable only by that run's container, and destroyed with the cell; it is never a bind mount of a control-plane or host path. The Sandbox port takes it in as content; how the adapter moves it (an archive stream, or a per-run volume the control plane fills) is the adapter's matter. Read-only for Planner and reviewers, writable for the Executor ([sandbox-docker.md](../adapters/sandbox-docker.md#content-transport)).
 3. After the Executor finishes, the adapter's trusted wrapper (not the agent) runs `git add -A && git diff --cached --binary <base>` in the container and writes `/out/change.patch`.
 4. The [Publisher](roles.md#publisher) applies it to the daemon's clean clone with hooks and config neutralised, refuses symlinks, paths outside the repository and any path under `.git/`, and evaluates path policy on the applied tree.
