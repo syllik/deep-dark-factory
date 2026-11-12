@@ -249,3 +249,12 @@ Source: Issue #39, DDF review of PR #38 (parent #32), findings r1-2, r1-3, r2-1,
 - 2026-11-12 AGENT-DEFAULT: When may Event.Key be empty? → Only for global events, such as a pause. Task: #67.
 - 2026-11-12 AGENT-DEFAULT: What are the IntentStatus and RunStatus values? → IntentStatus is pending, succeeded or failed. RunStatus is running, succeeded, failed or discarded. Task: #67.
 - 2026-11-12 AGENT-DEFAULT: Which files does schemas/embed.go embed? → Every top-level *.json, so the later config loader can use project.json, projects.json and routing.json. schemas/examples is not embedded. Task: #67.
+
+## 2026-11-13 M2 Task 2b: port interfaces (Issue #69)
+
+- 2026-11-13 AGENT-DEFAULT: How is dry-run expressed on forge writes? → A WriteMode second parameter on every forge write (live, dry-run); the zero value and any unknown value are refused, not a bool or a constructor flag. Task: #69.
+- 2026-11-13 AGENT-DEFAULT: How are agent failures typed? → One *AgentFailure error type with a Class; callers treat any other error as fatal. Task: #69.
+- 2026-11-13 AGENT-DEFAULT: Where do IDs come from, and is a find-task-by-key read added? → An IDSource port is added next to Clock; no find-task-by-key read is added (the forge port has exactly the spec 4.2 operations; the engine task adds one if reconciliation needs it). Task: #69.
+- 2026-11-13 AGENT-DEFAULT: How does Secret avoid leaking? → Secret redacts itself in fmt and refuses JSON and text marshalling. Task: #69.
+- 2026-11-13 AGENT-DEFAULT: How does Merge report a moved head? → Sentinel ErrHeadMoved. Task: #69.
+- 2026-11-13 AGENT-DEFAULT: Close and reopen task: one method or two? → Two methods, CloseTask and ReopenTask. Task: #69.
