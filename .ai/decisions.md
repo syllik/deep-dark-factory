@@ -239,3 +239,13 @@ Source: Issue #39, DDF review of PR #38 (parent #32), findings r1-2, r1-3, r2-1,
 - 2026-11-12 AGENT-DEFAULT: Align the plan with go.mod (go1.27.4, modernc.org/sqlite v1.62.0) or keep the original versions? → Align: Tech Stack and the Reuse Persistence row state the merged versions with a link to the decision log Dependencies section; OD-1 keeps its original options and recommendation and gains one outcome sentence. Task: #39.
 - 2026-11-12 AGENT-DEFAULT: Which r2-1 fix: union of go list over the four targets, or parsing every .go file regardless of build constraints? → Union over the four verify targets, the same method the decision log uses for 'Reaches'. Files built for none of the four targets are never compiled into a shipped binary and stay out of scope. Task: #39.
 - 2026-11-12 AGENT-DEFAULT: The config loader package does not exist and the plan does not name it; how is its yaml allowlist entry written? → As 'the config loader package, path named by the task that creates it'; that task adds the entry to test/boundaries/**, which makes it sensitive. Until then no core package may import go.yaml.in/yaml/v3. Task: #39.
+
+## 2026-11-12 M2 Task 2a: model and result validation (Issue #67)
+
+- 2026-11-12 AGENT-DEFAULT: How is the task key encoded? → Lowercase hex SHA-256, all 64 characters, over forge, repository, source kind and source id in that order. Each field is its decimal byte length, ':' and its bytes. An empty field is an error. Task: #67.
+- 2026-11-12 AGENT-DEFAULT: How do enums reject unknown values from JSON or store decoding? → Each enum type has a pointer-receiver UnmarshalText that calls its Parse<Type> function. Task: #67.
+- 2026-11-12 AGENT-DEFAULT: Does results.go return typed result structs? → No. It only validates. Typed result structs come with their first consumer. Task: #67.
+- 2026-11-12 AGENT-DEFAULT: How does the validator avoid reading references from disk or network? → The jsonschema compiler uses UseLoader(jsonschema.SchemeURLLoader{}), a loader that loads nothing. Each schema is added and compiled under a fixed mem:///schemas/<file name> URL. Task: #67.
+- 2026-11-12 AGENT-DEFAULT: When may Event.Key be empty? → Only for global events, such as a pause. Task: #67.
+- 2026-11-12 AGENT-DEFAULT: What are the IntentStatus and RunStatus values? → IntentStatus is pending, succeeded or failed. RunStatus is running, succeeded, failed or discarded. Task: #67.
+- 2026-11-12 AGENT-DEFAULT: Which files does schemas/embed.go embed? → Every top-level *.json, so the later config loader can use project.json, projects.json and routing.json. schemas/examples is not embedded. Task: #67.
