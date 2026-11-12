@@ -1,0 +1,72 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Go version equals the toolchain line
+        run: |
+          want="$(awk '$1 == "toolchain" { print $2 }' go.mod)"
+          got="$(go env GOVERSION)"
+          echo "toolchain line: ${want:-<missing>}; installed: ${got}"
+          test -n "$want"
+          test "$got" = "$want"
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: go mod verify
+        run: go mod verify
+      - name: go vet
+        run: go vet ./...
+      - name: exhaustive
+        run: go tool exhaustive ./...
+      - name: staticcheck
+        run: go tool staticcheck ./...
+      - name: go test
+        run: go test ./...
+      - name: Cross-build
+        run: |
+          for target in linux/arm64 linux/amd64 darwin/arm64 darwin/amd64; do
+            echo "build ${target}"
+            GOOS="${target%/*}" GOARCH="${target#*/}" go build ./...
+          done
+
+  vulncheck:
+    name: vulncheck
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: govulncheck
+        run: go tool govulncheck ./...
