@@ -8,7 +8,7 @@ Scope: DDF's own Go code. The stack and the CI steps are in the [M2 plan](../pla
 
 ## Toolchain
 
-- The Go version is the `toolchain` line of `go.mod`; nothing else pins it. Build and test with `CGO_ENABLED=0`; code that needs cgo is refused.
+- The Go version is the `toolchain` line of `go.mod`. CI pins it with the `verify` job step "Go version equals the toolchain line", which compares `go env GOVERSION` with that line ([plan Hosted CI](../plans/2026-11-05-m2-offline-core.md#hosted-ci-and-repository-settings)); `GOTOOLCHAIN=local` only prevents a toolchain download or switch and fails only when the installed Go is older than the `go` line. Build and test with `CGO_ENABLED=0`; code that needs cgo is refused.
 - Code is `gofmt`-formatted and passes the plan's **verify** sequence (`go vet`, `exhaustive`, `staticcheck`, tests, the four-target build) before it is published.
 - Imports in three groups, separated by a blank line: standard library, other modules, this module.
 
