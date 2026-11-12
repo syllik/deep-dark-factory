@@ -1,0 +1,3 @@
+package withcgo
+
+import "C"
