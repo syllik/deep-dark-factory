@@ -228,3 +228,14 @@ Source: Issue #63, plan `docs/plans/2026-11-05-m2-offline-core.md` OD-2 (Reuse t
 - 2026-11-12 AGENT-DEFAULT: Is plan verify item 7 one CI step or four? → One step that builds `./...` for the four GOOS/GOARCH targets in turn and fails on the first error, matching the plan's 'one step per verify item'. Task: #63.
 - 2026-11-12 AGENT-DEFAULT: Workflow name and extra keys (concurrency, timeout-minutes)? → Workflow `name: ci`. No concurrency, timeout or other keys beyond the plan's Hosted CI shape. Task: #63.
 - 2026-11-12 AGENT-DEFAULT: What if a dependency forces a `go` line above `go 1.27`, or `tidy` rewrites the go or toolchain lines? → Stop and return BLOCKED rather than accept a different `go` or `toolchain` line. Task: #63.
+
+## 2026-11-12 M2 plan review follow-ups (Issue #39)
+
+Source: Issue #39, DDF review of PR #38 (parent #32), findings r1-2, r1-3, r2-1, r2-2 and r2-3. Plan `docs/plans/2026-11-05-m2-offline-core.md`, spec §12.
+
+- 2026-11-12 Owner decision (in chat): `cmd/ddfd/**` joins the `sensitive` row of DDF's own profile, right after `internal/daemon/**`, in `docs/orchestrator/manual-mode.md` and spec §12 (r2-2). Task: #39.
+- 2026-11-12 Owner decision (in chat): the import-boundary test enforces a per-package allowlist of third-party imports from `internal/core/**`; a new or changed entry is a `sensitive` change (plan Task 2 Step 4, OD-16; r2-3). Task: #39.
+- 2026-11-12 AGENT-DEFAULT: Is the CI version-equality step a numbered verify item? → No. It is named as the first step of the CI `verify` job, before items 1-7; the numbered verify items 1-8 stay unchanged, because a local run may use another Go (GOTOOLCHAIN=auto) and the item numbers are referenced elsewhere. Task: #39.
+- 2026-11-12 AGENT-DEFAULT: Align the plan with go.mod (go1.27.4, modernc.org/sqlite v1.62.0) or keep the original versions? → Align: Tech Stack and the Reuse Persistence row state the merged versions with a link to the decision log Dependencies section; OD-1 keeps its original options and recommendation and gains one outcome sentence. Task: #39.
+- 2026-11-12 AGENT-DEFAULT: Which r2-1 fix: union of go list over the four targets, or parsing every .go file regardless of build constraints? → Union over the four verify targets, the same method the decision log uses for 'Reaches'. Files built for none of the four targets are never compiled into a shipped binary and stay out of scope. Task: #39.
+- 2026-11-12 AGENT-DEFAULT: The config loader package does not exist and the plan does not name it; how is its yaml allowlist entry written? → As 'the config loader package, path named by the task that creates it'; that task adds the entry to test/boundaries/**, which makes it sensitive. Until then no core package may import go.yaml.in/yaml/v3. Task: #39.
