@@ -8,6 +8,8 @@ Status: accepted 2026-11-05 (#24); Go rewrite (Issues #32, #37) accepted when th
 
 > **Rewritten for the #43 decisions (2026-11-14, Issue #74).** The owner decisions of 2026-11-10 and the audit answers of 2026-11-14 on Issue #43 ([decision log](../../.ai/decisions.md)) made the remaining M2 work a walking skeleton. Changed: Status, Architecture, Reuse (Persistence and signature rows), Review Focus 3 and 5, the risk class of every remaining task (narrowed profile), Task 0 and Task 2 Step 4 (notes only; their text stays as merged), Tasks 3 to 14 rewritten or split, the new Tasks 2d, 15, 16 and 17, PR order, Outcome lines on OD-7 and on the adapter store-access decision, the open-decisions preamble, and M2 exit.
 
+> **Follow-up #76 (2026-11-15).** Changed: Architecture (subpackages), Tasks 4, 6a, 8a, 8b and 11 for the PR #75 review findings: changed paths, owner-approved hard-stop entries, the `hit_stop` refusal row, `.opencode/` and `.claude/` as forbidden paths, the `sensitive` git helper.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Subagents never commit, push or change GitHub; the orchestrator session commits, opens PRs and closes Issues. Every task runs by [manual mode](../orchestrator/manual-mode.md) and the owner merges. Code follows the [code conventions](../development/code-conventions.md).
 
 **Goal:** Implement the offline core of [spec §4.1](../specs/2026-11-03-ddf-v1-design.md#41-core-no-network-no-forge-no-provider) (all modules except `context`, which is M3), plus `forge-local`, `sandbox-fake`, a fake agent and the daemon wiring needed to run the whole lifecycle in tests: offline, with no network, forge or provider ([spec §14](../specs/2026-11-03-ddf-v1-design.md#14-milestones), M2 row).
@@ -20,7 +22,7 @@ Status: accepted 2026-11-05 (#24); Go rewrite (Issues #32, #37) accepted when th
 - The fake agent and the in-memory port fakes live in `test/fakes/` (OD-6). End-to-end scenarios live in `test/e2e/`; the import-boundary test in `test/boundaries/`. Unit tests sit next to their package as `*_test.go`; fixtures in `testdata/`.
 - Go's `internal/` rule keeps every package out of reach of other modules, so no package API becomes an external contract. It does not order the packages inside the module; the boundary test (Tasks 2 and 2d) does: core never imports adapters, the daemon or `test/**`; adapters import only core (ports, model, the workspace git helper) and no package of `internal/core/store` (Task 2d), and never another adapter; only the daemon wires them; nothing outside `test/**` imports `test/**`.
 - Walking skeleton first: thin slices reach an end-to-end merge on fakes (Tasks 12a and 13a) before the depth tasks (#43 decision 10).
-- Subpackages: `internal/core/policy/gate` (merge gate), `internal/core/policy/signature` (review signatures), `internal/core/workspace/patch` (patch export and apply) and `internal/core/config` (config loader).
+- Subpackages: `internal/core/policy/gate` (merge gate), `internal/core/policy/signature` (review signatures), `internal/core/workspace/patch` (patch export and apply), `internal/core/workspace/git` (git helper and clean clone, `sensitive`) and `internal/core/config` (config loader).
 - `lifecycle`, `policy` and `scheduler` are pure: they take a clock and inputs and do no I/O. `store` is the only package that imports the SQLite driver or `database/sql`. `workspace` is the only core package that imports `os/exec`.
 
 **Tech Stack:**
@@ -169,7 +171,7 @@ Outcome: the `sensitive` rows were narrowed on 2026-11-14 by #43 decision 10 ([s
 
 - [ ] **Step 1:** Effective autonomy as the minimum of the layers ([policy.md](../concepts/policy.md#autonomy-levels), [config layers](../concepts/config-layers.md#resolution-order)).
 - [ ] **Step 2:** Risk class from diff and profile ([policy.md](../concepts/policy.md#risk-classes)): the [changed-lines rule](../concepts/policy.md#changed-lines), the [lockfile list](../concepts/policy.md#lockfiles), `ciEntrypoints`, the [agent-instruction files](../concepts/policy.md#agent-instruction-files) never `docs`; reviewer set; blocking findings ([#findings](../concepts/policy.md#findings)).
-- [ ] **Step 3:** Path policy: defaults of [spec §6.5](../specs/2026-11-03-ddf-v1-design.md#65-path-policy) plus project `forbidden`, symlinks; hard-stop detection by the default hard-stop globs of the `sync:hard-stop-globs` block ([#hard-stops](../concepts/policy.md#hard-stops)).
+- [ ] **Step 3:** Path policy and hard-stop detection over the [changed paths](../concepts/policy.md#changed-paths): defaults of [spec §6.5](../specs/2026-11-03-ddf-v1-design.md#65-path-policy) plus project `forbidden`, with `.opencode/` and `.claude/` at any depth forbidden; added or changed symlinks; hard-stop entries by the default hard-stop globs of the `sync:hard-stop-globs` block ([#hard-stops](../concepts/policy.md#hard-stops)), approved entries excepted.
 - [ ] **Step 4:** Glob fixture suite (OD-11) over every synced list: forbidden paths, hard-stop globs, lockfiles and agent-instruction files.
 - [ ] **Verify:** verify.
 
@@ -192,7 +194,7 @@ Outcome: the `sensitive` rows were narrowed on 2026-11-14 by #43 decision 10 ([s
 **Depends on:** Tasks 2, 5 (refusal type).
 
 - [ ] **Step 1:** Pure happy-path transitions of [lifecycle.md#conveyor](../concepts/lifecycle.md#conveyor); planner, executor and reviewer verdict routing; the flags.
-- [ ] **Step 2:** Merge-refusal mapping ([#merge-refusals](../concepts/lifecycle.md#merge-refusals)).
+- [ ] **Step 2:** Merge-refusal mapping ([#merge-refusals](../concepts/lifecycle.md#merge-refusals)), including `needs-owner` once per head for a hard stop or path policy on the current head and the `hit_stop` row (stay, no new `needs-owner`).
 - [ ] **Verify:** verify.
 
 ### Task 6b: Lifecycle depth
@@ -220,12 +222,12 @@ Scope per #43 answer 3.
 
 ### Task 8a: Workspace
 
-**Files:** Create `internal/core/workspace/**` except `internal/core/workspace/patch/**`.
-**Risk class:** default row: `standard` if > 200 lines, else `low`.
+**Files:** Create `internal/core/workspace/**` except `internal/core/workspace/patch/**`; the git helper and the clean clone go in `internal/core/workspace/git/**`.
+**Risk class:** `sensitive` (git-helper row, `internal/core/workspace/git/**`; #76).
 **Depends on:** Task 2.
 
-- [ ] **Step 1:** Git helper with explicit env (Tech Stack); minimum git version check.
-- [ ] **Step 2:** Clean clone with hooks, fsmonitor and filters neutralised; per-run copy without remotes ([spec §8.3](../specs/2026-11-03-ddf-v1-design.md#83-workspaces-and-publication)).
+- [ ] **Step 1:** Git helper with explicit env (Tech Stack); minimum git version check; every git call of `internal/core/workspace/**` goes through it.
+- [ ] **Step 2:** Clean clone in `workspace/git` with hooks, fsmonitor and filters neutralised; per-run copy without remotes ([spec §8.3](../specs/2026-11-03-ddf-v1-design.md#83-workspaces-and-publication)).
 - [ ] **Step 3:** `patch-id --verbatim`; daemon base merge that records its SHA; conflict detection; workflow-file change check since the merge base ([#sync-with-base](../concepts/lifecycle.md#sync-with-base)).
 - [ ] **Verify:** verify.
 
@@ -235,8 +237,8 @@ Scope per #43 answer 3.
 **Risk class:** `sensitive` (patch-apply row).
 **Depends on:** Task 8a.
 
-- [ ] **Step 1:** Patch export (the trusted-wrapper command of §8.3 as a function); patch apply with refusals: symlink, outside the repository, `.git/`, additions under `.opencode/`, `.claude/`, `node_modules/`.
-- [ ] **Step 2:** Tests include planted hooks and config that must not run (probe 4).
+- [ ] **Step 1:** Patch export (the trusted-wrapper command of §8.3 as a function); patch apply with refusals: symlink, outside the repository, `.git/`, `node_modules/` additions (failed run). Apply returns the changed paths with mode and blob ID for path policy, which handles `.opencode/` and `.claude/` paths (Task 4).
+- [ ] **Step 2:** Probe-4 tests (planted hooks and config that must not run) run through the exact `workspace/git` clean-clone function the Publisher uses and the Task 8a base-merge function the daemon uses.
 - [ ] **Verify:** verify.
 
 ### Task 9: Fakes
@@ -267,8 +269,8 @@ Scope per #43 answer 3.
 **Risk class:** `sensitive` (Publisher row, `internal/core/publisher/**`).
 **Depends on:** Tasks 4, 8b, 9 (`sandbox-fake` for the local gate, the secrets fake for redaction).
 
-- [ ] **Step 1:** Apply the patch to a clean clone (`workspace/patch`); path policy and risk class on the applied tree; local gate through the sandbox port before push; one commit and one push per revision ([roles.md#publisher](../concepts/roles.md#publisher)).
-- [ ] **Step 2:** The [hard-stop](../concepts/policy.md#hard-stops) and [forbidden-path](../concepts/policy.md#forbidden-paths) flow: a hard-stop change is not published and the task goes to `needs-owner` before publishing; a forbidden-path or symlink change is refused and never published automatically; `hit_stop` set in both cases.
+- [ ] **Step 1:** Apply the patch to a clean clone (`workspace/patch`); path policy and risk class on the [changed paths](../concepts/policy.md#changed-paths) of the applied tree; local gate through the sandbox port before push; one commit and one push per revision ([roles.md#publisher](../concepts/roles.md#publisher)).
+- [ ] **Step 2:** The [hard-stop](../concepts/policy.md#hard-stops) and [forbidden-path](../concepts/policy.md#forbidden-paths) flow: a hard-stop change is not published and the task goes to `needs-owner` before publishing; a forbidden-path or symlink change is refused and never published automatically; `hit_stop` set in both cases. `.opencode/` and `.claude/` paths follow the forbidden-path flow; a revision whose hard-stop entries are all owner-approved is published without a new question.
 - [ ] **Step 3:** Change body and squash message from [`change-template.md`](../../templates/project/.ddf/change-template.md); sanitizer for closing keywords, `[skip ci]`-style directives and mentions; `Closes` only for the task.
 - [ ] **Step 4:** Redaction by secret patterns and loaded values; a patch carrying a loaded value is refused (OD-10, [spec §8.4](../specs/2026-11-03-ddf-v1-design.md#84-containers)).
 - [ ] **Verify:** verify.
