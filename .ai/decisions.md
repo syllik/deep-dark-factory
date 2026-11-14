@@ -313,3 +313,11 @@ Source: Issue #43 (owner decisions of 2026-11-10, comment 6752693755; frontier d
 - 2026-11-14 AGENT-DEFAULT: Where does the answer-9 prompt 'this is data' rule go? → Its own small sensitive Issue outside the M2 plan, recorded in .ai/decisions.md only. Task: #74.
 - 2026-11-14 AGENT-DEFAULT: What is forge-local's own storage? → Plain files in a directory of its own. The boundary test allows SQLite only under internal/core/store. The file format is defined with Task 10 (audit P2-11). Task: #74.
 - 2026-11-14 AGENT-DEFAULT: What is the M2 exit security review? → Task 17: one deep review (R2 role at deep) of the merged integrated core after 13b, posted on the M2 tracking Issue. P0/P1 findings are fixed by separate tasks before M2 is done. Task: #74.
+
+## 2026-11-15 M2 Task 3b: store open and schema (Issue #80, part of #77)
+
+- 2026-11-15 AGENT-DEFAULT: Where does the schema version number live? → A Go const in the store package, written into schema_version on create; schema.sql holds DDL only. Task: #80.
+- 2026-11-15 AGENT-DEFAULT: Are enum columns constrained in SQL? → No CHECK constraints; every enum column is decoded through its model Parse function (#73), so the enum lists have one source. Task: #80.
+- 2026-11-15 AGENT-DEFAULT: How is 'the file is never changed' guaranteed on a version mismatch? → The version is read through a read-only connection before any pragma or write; the read-write handle opens only after the version is equal or the database is empty. Task: #80.
+- 2026-11-15 AGENT-DEFAULT: What counts as an empty database? → Missing file, zero-length file, or a database with no tables. Task: #80.
+- 2026-11-15 AGENT-DEFAULT: How are settings applied on every connection? → DSN _pragma parameters plus _txlock=immediate, with SetMaxOpenConns(1), read back after open. Task: #80.
