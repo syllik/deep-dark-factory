@@ -74,11 +74,12 @@ Trusted code, not an agent. Steps in [lifecycle.md](lifecycle.md#publishing):
 
 - applies the patch to the daemon's clean clone with hooks and config neutralised;
 - refuses symlinks, paths outside the repository and any path under `.git/`;
-- evaluates path policy and risk class on the applied tree;
+- evaluates path policy and risk class on the revision's [changed paths](policy.md#changed-paths);
 - runs the local gate in a fresh container before any push;
 - one commit and one push per revision; no force-push, rebase or amend;
 - writes the change body and squash message from a template; agent text only in a sanitized section;
-- refuses a patch that adds a `.opencode/`, `.claude/` or (unless the profile allows it) `node_modules/` path: failed run;
+- refuses a patch that adds a `node_modules/` path (unless the profile allows it): failed run;
+- treats a `.opencode/` or `.claude/` path at any depth as a [forbidden path](policy.md#forbidden-paths): not published, `needs-owner`, `hit_stop` set;
 - redacts all agent-originated text (review projection comments, change body, commit message, patch content, Telegram messages) by secret patterns and by the exact values of the secrets loaded into that run's container before every forge write and notification; a patch containing a loaded secret value is refused: hard stop `secrets`, failed run ([lifecycle.md](lifecycle.md#publishing)).
 
 Rationale: [spec §5.2](../specs/2026-11-03-ddf-v1-design.md#52-states-and-transitions), [spec §8.3](../specs/2026-11-03-ddf-v1-design.md#83-workspaces-and-publication), [spec §8.4](../specs/2026-11-03-ddf-v1-design.md#84-containers).

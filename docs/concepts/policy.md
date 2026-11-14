@@ -50,6 +50,17 @@ The count that `risk.lowMaxLines` is compared against:
 
 Rationale: [spec §6.2](../specs/2026-11-03-ddf-v1-design.md#62-risk-classes-and-reviewers).
 
+## Changed paths
+
+The set every path rule and path check matches: the [risk class](#risk-classes), [path policy](#forbidden-paths), [hard stops](#hard-stops), the [Publisher](roles.md#publisher)'s refusals and the [merge gate](#merge-gate).
+
+1. The changed paths are the paths that differ between the merge base of the integration branch and the change, and the tree checked: the revision's applied tree (Publisher) or the change head (merge gate).
+2. They include every added, modified, deleted or type-changed path, a mode-only change included, and both the old and the new path of a rename (`git diff --raw -M --no-abbrev`, which also gives each path's mode and blob ID).
+3. Path rules never match the unchanged rest of the tree; a deletion matches like an addition. Example: deleting `deploy/prod.yaml` matches the hard-stop glob `deploy/**`.
+4. The symlink rule is narrower: only an added or changed symlink is refused ([Forbidden paths](#forbidden-paths)).
+
+Rationale: [spec §6.2](../specs/2026-11-03-ddf-v1-design.md#62-risk-classes-and-reviewers).
+
 ## Lockfiles
 
 A fixed product list, not a profile key in V1:
@@ -127,11 +138,12 @@ Default hard-stop globs:
 
 Rules:
 
-1. A change whose applied tree matches a default hard-stop glob is not published. The task goes to `needs-owner` (category and paths) before publishing, and `hit_stop` is set.
-2. After the owner's answer, the Publisher publishes that revision and the task continues at `propose` (human merge); an owner who does not want it closes the task.
-3. A hard stop found on a published head maps to the refusal row ([lifecycle.md](lifecycle.md#merge-refusals)).
-4. Projects add hard-stop categories (`hardStops` in the project profile), which the reviewers' hard-stop checklist covers. V1 has no project hard-stop glob key; a project uses `forbidden` or `risk.sensitive` for paths.
-5. A change that hit a hard stop or path policy is never merged autonomously, even after an owner answer: it continues at `propose`. `hit_stop` is sticky: it is never cleared.
+1. The **hard-stop entries** of a tree are its [changed paths](#changed-paths) that match a default hard-stop glob, each with its state in that tree (blob ID and mode, or deleted).
+2. A revision with a hard-stop entry the owner has not approved is not published. The task goes to `needs-owner` (category and paths) before publishing, and `hit_stop` is set.
+3. The owner's answer approves exactly the entries the question listed. The Publisher then publishes that revision (the owner-answered revision) and the task continues at `propose` (human merge); an owner who does not want it closes the task. A later revision or head whose hard-stop entries are all approved asks nothing new; any other entry (a new path, other content or mode, a deletion) is a new hard stop.
+4. On a published head, an unapproved hard-stop entry, a forbidden path or an added or changed symlink fails [merge gate](#merge-gate) condition 6 and maps to the refusal row ([lifecycle.md](lifecycle.md#merge-refusals)), which asks the owner at most once per head. A head already asked about maps to the `hit_stop` row (condition 2), which asks nothing new; the owner-answered revision does not fail condition 6, since its entries are approved.
+5. Projects add hard-stop categories (`hardStops` in the project profile), which the reviewers' hard-stop checklist covers. V1 has no project hard-stop glob key; a project uses `forbidden` or `risk.sensitive` for paths.
+6. A change that hit a hard stop or path policy is never merged autonomously, even after an owner answer: it continues at `propose`. `hit_stop` is sticky: it is never cleared.
 
 Rationale: [spec §6.4](../specs/2026-11-03-ddf-v1-design.md#64-hard-stops).
 
@@ -153,8 +165,9 @@ Rules:
 1. The project's `ciEntrypoints` (scripts and manifests CI relies on, e.g. `package.json`, guard scripts) are not forbidden but force the `sensitive` class.
 2. Path policy is evaluated from the integration branch copy of the profile, never from the change itself.
 3. Projects add more (`forbidden` in the project profile); they cannot remove defaults.
-4. The Publisher evaluates path policy on the applied tree before any forge write ([identity.md](identity.md#workspaces-and-publication)).
-5. A change touching a forbidden path or symlink is refused by the Publisher and never published automatically (probe 3). The task goes to `needs-owner` and `hit_stop` is set. After the owner's answer it returns to `running` with the answer in the Executor brief; a revision that still touches a forbidden path is refused again. Forbidden paths change only in a human-merged change.
+4. The Publisher evaluates path policy on the [changed paths](#changed-paths) of the applied tree before any forge write ([identity.md](identity.md#workspaces-and-publication)).
+5. A revision whose changed paths touch a forbidden path or hold an added or changed symlink is refused by the Publisher and never published automatically (probe 3). The task goes to `needs-owner` and `hit_stop` is set. After the owner's answer it returns to `running` with the answer in the Executor brief; a revision that still touches a forbidden path is refused again. Forbidden paths change only in a human-merged change.
+6. Agent configuration directories count at any depth: a changed path under `.opencode/` or `.claude/` anywhere in the tree (`**/.opencode/**`, `**/.claude/**`) is a forbidden path ([identity.md](identity.md#workspaces-and-publication)).
 
 Rationale: [spec §6.5](../specs/2026-11-03-ddf-v1-design.md#65-path-policy).
 
@@ -167,7 +180,7 @@ Rationale: [spec §6.5](../specs/2026-11-03-ddf-v1-design.md#65-path-policy).
 3. change open, not draft;
 4. every reviewer required by the risk class has a valid signed review with verdict APPROVE and zero blocking findings, for the current head **or** for an ancestor head where every later commit is a base merge the daemon itself created (its SHA recorded in the store from the daemon's own intent; author metadata does not count) and `git patch-id --verbatim` of the change is unchanged; a base merge made by anyone else (e.g. a human "Update branch") never qualifies;
 5. every check in the profile's `checks.required` is present and successful on the current head (with no list: at least one check run, all successful);
-6. path policy passes;
+6. path policy passes and no unapproved hard-stop entry is in the head's changed paths (§6.2, §6.4);
 7. change not behind base and mergeable;
 8. any forge read error → refusal (fail-closed).
 
