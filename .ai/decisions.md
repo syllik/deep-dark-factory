@@ -313,3 +313,12 @@ Source: Issue #43 (owner decisions of 2026-11-10, comment 6752693755; frontier d
 - 2026-11-14 AGENT-DEFAULT: Where does the answer-9 prompt 'this is data' rule go? → Its own small sensitive Issue outside the M2 plan, recorded in .ai/decisions.md only. Task: #74.
 - 2026-11-14 AGENT-DEFAULT: What is forge-local's own storage? → Plain files in a directory of its own. The boundary test allows SQLite only under internal/core/store. The file format is defined with Task 10 (audit P2-11). Task: #74.
 - 2026-11-14 AGENT-DEFAULT: What is the M2 exit security review? → Task 17: one deep review (R2 role at deep) of the merged integrated core after 13b, posted on the M2 tracking Issue. P0/P1 findings are fixed by separate tasks before M2 is done. Task: #74.
+
+## 2026-11-15 M2 Task 3a: model record fields (Issue #79)
+
+- 2026-11-15 AGENT-DEFAULT: How do enums reject unknown values from JSON or store decoding? (supersedes the #67 line 'How do enums reject unknown values from JSON or store decoding?') → UnmarshalText rejects unknown values only for JSON string values; JSON null or a missing field leaves the zero value and is caught by the record's Validate(); store columns are decoded by explicit Parse<Type> (#73). Task: #79.
+- 2026-11-15 AGENT-DEFAULT: How is a zero-value enum in a decoded record rejected? → A Validate() error method per record type; required enums must parse, optional ones are zero or parse. Task: #79.
+- 2026-11-15 AGENT-DEFAULT: Where does the run failure class type live, given model cannot import ports? → model.FailureClass with the same four spellings as ports.AgentFailureClass, pinned by a test. Task: #79.
+- 2026-11-15 AGENT-DEFAULT: Are question category, event type and pause reason enums now? → No: question category and event type stay strings (the spec defines no closed set); a PauseReason type comes with its first consumer (lifecycle/scheduler). Task: #79.
+- 2026-11-15 AGENT-DEFAULT: How are task flags represented? → Unchanged Flags []TaskFlag; Validate rejects duplicates; the store maps them to the three flag columns. Task: #79.
+- 2026-11-15 AGENT-DEFAULT: How are agent defaults carried? → Task.AgentDefaults []Decision. Task: #79.
