@@ -93,6 +93,28 @@ func TestEnums_RoundTripAndRejectUnknown(t *testing.T) {
 		{"ResultKind role results", func(t *testing.T) {
 			checkEnum(t, "planner executor reviewer", []model.ResultKind{model.ResultKindPlanner, model.ResultKindExecutor, model.ResultKindReviewer}, model.ParseResultKind)
 		}},
+		{"TaskKind spec §4.5", func(t *testing.T) {
+			checkEnum(t, "task request followup", []model.TaskKind{model.TaskKindTask, model.TaskKindRequest, model.TaskKindFollowup}, model.ParseTaskKind)
+		}},
+		{"Priority spec §4.5", func(t *testing.T) {
+			checkEnum(t, "high normal low", []model.Priority{model.PriorityHigh, model.PriorityNormal, model.PriorityLow}, model.ParsePriority)
+		}},
+		{"RunPurpose spec §4.5", func(t *testing.T) {
+			checkEnum(t, "planning initial correction sync ci-fix review", []model.RunPurpose{model.RunPurposePlanning, model.RunPurposeInitial, model.RunPurposeCorrection, model.RunPurposeSync, model.RunPurposeCIFix, model.RunPurposeReview}, model.ParseRunPurpose)
+		}},
+		{"FailureClass spec §4.5", func(t *testing.T) {
+			checkEnum(t, "credential rate-limited retryable fatal", []model.FailureClass{model.FailureClassCredential, model.FailureClassRateLimited, model.FailureClassRetryable, model.FailureClassFatal}, model.ParseFailureClass)
+		}},
+		{"ChangeKind spec §4.5", func(t *testing.T) {
+			checkEnum(t, "change revert", []model.ChangeKind{model.ChangeKindChange, model.ChangeKindRevert}, model.ParseChangeKind)
+		}},
+		{"FindingRoute spec §4.5", func(t *testing.T) {
+			checkEnum(t, "fixing followup minors", []model.FindingRoute{model.FindingRouteFixing, model.FindingRouteFollowup, model.FindingRouteMinors}, model.ParseFindingRoute)
+		}},
+		{"IntentOperation spec §4.5", func(t *testing.T) {
+			checkEnum(t, "create-task push open-change update-change post-review update-branch merge revert close-task reopen-task",
+				[]model.IntentOperation{model.IntentOperationCreateTask, model.IntentOperationPush, model.IntentOperationOpenChange, model.IntentOperationUpdateChange, model.IntentOperationPostReview, model.IntentOperationUpdateBranch, model.IntentOperationMerge, model.IntentOperationRevert, model.IntentOperationCloseTask, model.IntentOperationReopenTask}, model.ParseIntentOperation)
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, tt.run)
