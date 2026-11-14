@@ -22,9 +22,9 @@ Rationale: [spec §6.2](../specs/2026-11-03-ddf-v1-design.md#62-risk-classes-and
 | Class | Condition (deterministic) | Reviewers |
 |---|---|---|
 | `docs` | only `risk.docs` paths; agent-instruction files are never `docs` | R1 |
-| `low` | code, changed lines ≤ `risk.lowMaxLines` (default 200, lockfiles and pure renames excluded from the count), no `risk.sensitive` or hard-stop path | R1 |
+| `low` | code, [changed lines](#changed-lines) ≤ `risk.lowMaxLines` (default 200, lockfiles and pure renames excluded from the count), no `risk.sensitive` or hard-stop path | R1 |
 | `standard` | other code | R1 + R2 |
-| `sensitive` | any `risk.sensitive` path (money, keys, auth, data, migrations) or default hard-stop globs (deploy, infrastructure, container files, IaC) | R1 + R2, R2 at `deep` |
+| `sensitive` | any `risk.sensitive` path (money, keys, auth, data, migrations) or the default hard-stop globs (see [Hard stops](#hard-stops)) | R1 + R2, R2 at `deep` |
 | `revert` | an exact revert of one DDF merge commit, produced by DDF | R1 |
 
 Rules:
@@ -35,6 +35,67 @@ Rules:
 4. Paths in the project's `ciEntrypoints` force `sensitive` (see [Forbidden paths](#forbidden-paths)).
 
 R1 = [Reviewer-correctness](roles.md#reviewer-correctness), R2 = [Reviewer-security](roles.md#reviewer-security).
+
+## Changed lines
+
+The count that `risk.lowMaxLines` is compared against:
+
+1. The count comes from `git diff --numstat -M` between the merge base of the integration branch and the change head, and the head: the whole change, with daemon base merges excluded by the moved merge base.
+2. Changed lines = added + deleted lines, summed over counted files.
+3. [Lockfiles](#lockfiles) are not counted.
+4. A pure rename (similarity 100%) counts 0; a rename with edits counts only its added and deleted lines.
+5. Any binary file added, changed or deleted makes the change exceed `risk.lowMaxLines`.
+6. A mode-only change counts 0.
+7. Every path rule (docs, sensitive, `ciEntrypoints`, hard-stop globs, forbidden, agent-instruction files) matches both the old and the new path of a rename.
+
+Rationale: [spec §6.2](../specs/2026-11-03-ddf-v1-design.md#62-risk-classes-and-reviewers).
+
+## Lockfiles
+
+A fixed product list, not a profile key in V1:
+
+<!-- sync:lockfiles -->
+- `**/package-lock.json`
+- `**/npm-shrinkwrap.json`
+- `**/yarn.lock`
+- `**/pnpm-lock.yaml`
+- `**/bun.lock`
+- `**/bun.lockb`
+- `**/go.sum`
+- `**/Cargo.lock`
+- `**/poetry.lock`
+- `**/Pipfile.lock`
+- `**/uv.lock`
+- `**/Gemfile.lock`
+- `**/composer.lock`
+- `**/mix.lock`
+- `**/pubspec.lock`
+- `**/Package.resolved`
+- `**/packages.lock.json`
+- `**/gradle.lockfile`
+- `**/flake.lock`
+<!-- /sync:lockfiles -->
+
+## Agent-instruction files
+
+Never `docs`; they are classed by the code rows. A fixed product list, not a profile key in V1:
+
+<!-- sync:agent-instruction-files -->
+- `**/AGENTS.md`
+- `**/CLAUDE.md`
+- `**/GEMINI.md`
+- `**/SKILL.md`
+- `**/.cursorrules`
+- `**/.windsurfrules`
+- `**/.github/copilot-instructions.md`
+- `**/.agents/**`
+- `**/.claude/**`
+- `**/.codex/**`
+- `**/.cursor/**`
+- `**/.opencode/**`
+- `**/.mcp.json`
+- `**/opencode.json`
+<!-- /sync:agent-instruction-files -->
 
 ## Findings
 
@@ -48,8 +109,29 @@ Routing of non-blocking findings (P2 follow-up, P3 minors) is in [lifecycle.md](
 
 Always `needs-owner`: secrets and credentials, deploy and infrastructure, real money, destructive data operations, forge or repository settings, other repositories, purchases.
 
-- Projects add categories and path globs (`hardStops` in the project profile).
-- A change that hit a hard stop or path policy is never merged autonomously, even after an owner answer: it continues at `propose`.
+Default hard-stop globs:
+
+<!-- sync:hard-stop-globs -->
+- `Dockerfile*`
+- `**/Dockerfile*`
+- `docker-compose*.y*ml`
+- `**/*.tf`
+- `**/*.tfvars`
+- `k8s/**`
+- `helm/**`
+- `deploy/**`
+- `infra/**`
+- `.terraform/**`
+- `ansible/**`
+<!-- /sync:hard-stop-globs -->
+
+Rules:
+
+1. A change whose applied tree matches a default hard-stop glob is not published. The task goes to `needs-owner` (category and paths) before publishing, and `hit_stop` is set.
+2. After the owner's answer, the Publisher publishes that revision and the task continues at `propose` (human merge); an owner who does not want it closes the task.
+3. A hard stop found on a published head maps to the refusal row ([lifecycle.md](lifecycle.md#merge-refusals)).
+4. Projects add hard-stop categories (`hardStops` in the project profile), which the reviewers' hard-stop checklist covers. V1 has no project hard-stop glob key; a project uses `forbidden` or `risk.sensitive` for paths.
+5. A change that hit a hard stop or path policy is never merged autonomously, even after an owner answer: it continues at `propose`. `hit_stop` is sticky: it is never cleared.
 
 Rationale: [spec §6.4](../specs/2026-11-03-ddf-v1-design.md#64-hard-stops).
 
@@ -72,6 +154,7 @@ Rules:
 2. Path policy is evaluated from the integration branch copy of the profile, never from the change itself.
 3. Projects add more (`forbidden` in the project profile); they cannot remove defaults.
 4. The Publisher evaluates path policy on the applied tree before any forge write ([identity.md](identity.md#workspaces-and-publication)).
+5. A change touching a forbidden path or symlink is refused by the Publisher and never published automatically (probe 3). The task goes to `needs-owner` and `hit_stop` is set. After the owner's answer it returns to `running` with the answer in the Executor brief; a revision that still touches a forbidden path is refused again. Forbidden paths change only in a human-merged change.
 
 Rationale: [spec §6.5](../specs/2026-11-03-ddf-v1-design.md#65-path-policy).
 
@@ -91,7 +174,7 @@ Rationale: [spec §6.5](../specs/2026-11-03-ddf-v1-design.md#65-path-policy).
 Rules:
 
 - The merge is pinned to the evaluated head (GitHub: merge with the `sha` parameter; `forge-local`: compare-and-swap ref update). A moved head fails the merge.
-- Review signatures are HMAC-SHA256 with a key only the daemon holds; the gate reads reviews from the store and verifies signatures; forge comments are a projection.
+- Review signatures are Ed25519 with a key ID and a version (`ddf.review-signature/v1`), made with a private key only the daemon holds ([spec §6.6](../specs/2026-11-03-ddf-v1-design.md#66-merge-gate)); the gate reads reviews from the store and rejects an unknown version, an unknown key ID or a bad signature (fail-closed); forge comments are a projection.
 - Each refusal maps to a transition: [lifecycle.md](lifecycle.md#merge-refusals).
 
 Rationale: [spec §6.6](../specs/2026-11-03-ddf-v1-design.md#66-merge-gate).

@@ -103,7 +103,7 @@ registries: [registry.npmjs.org]   # verify runs `npm ci`; omit when the image c
 
 Inputs to the risk class ([policy.md](../concepts/policy.md#risk-classes)).
 
-- `lowMaxLines` (default 200): changed-line limit for `low`; lockfiles and pure renames are excluded from the count.
+- `lowMaxLines` (default 200): changed-line limit for `low`; lockfiles and pure renames are excluded from the count ([changed lines](../concepts/policy.md#changed-lines)).
 - `docs`: paths that alone make a change `docs`. Agent-instruction files are never `docs`.
 - `sensitive`: any match makes the change `sensitive` (R1 + R2, R2 at `deep`).
 
@@ -132,7 +132,7 @@ forbidden: ["ops/**"]
 
 ### `hardStops`
 
-Hard-stop categories, e.g. `secrets`, `deploy`, `real-money`, `data-destructive`. Projects may add categories; the product hard stops always apply ([policy.md](../concepts/policy.md#hard-stops)).
+Hard-stop categories, e.g. `secrets`, `deploy`, `real-money`, `data-destructive`. Projects may add categories only, which the reviewers' hard-stop checklist covers; the product hard stops always apply. Path-based hard stops are the default hard-stop globs ([policy.md](../concepts/policy.md#hard-stops)); a project uses `forbidden` or `risk.sensitive` for paths.
 
 ```yaml
 hardStops: [secrets, deploy, real-money, data-destructive]

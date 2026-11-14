@@ -41,10 +41,10 @@ The operator's own home directory and personal forge login are not accessible to
 
 ## Service manager
 
-- **macOS colima profile:** a launchd job for the `ddf` user. launchd restarts the daemon (never the VM) after host sleep; expired run leases are released on start ([spec §9](../specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery)).
+- **macOS colima profile:** a launchd job for the `ddf` user. launchd restarts the daemon (never the VM) after host sleep, and recovery runs as below ([spec §9](../specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery)).
 - **macOS colima profile:** launchd supervises `ddfd`, not the container VM: `ddfd` checks VM health and restarts the VM itself. A separate launchd colima job is only a boot-time starter (`RunAtLoad`, no `KeepAlive`, so it never races `ddfd`'s own restart) ([spec §8.1](../specs/2026-11-03-ddf-v1-design.md#81-host)).
 - **Linux container profile:** a systemd unit that runs the control-plane container as the host user `ddf`.
-- On start the daemon takes the instance lock and lists execution resources by label (task key, run ID): resources whose task is terminal or unknown to the store are destroyed and verified, and the teardown is recorded; resources of a non-terminal task are, in V1, killed and their run discarded (retried within budget). It then reconciles unresolved forge intents by task-key marker ([lifecycle.md](../concepts/lifecycle.md#store-intents-and-leases), [spec §9](../specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery)).
+- On start the daemon takes the instance lock and lists execution resources by label (task key, run ID): resources whose task is terminal or unknown to the store are destroyed and verified, and the teardown is recorded; resources of a non-terminal task are, in V1, killed and their run discarded (retried within budget). It then reconciles unresolved forge intents by task-key marker ([lifecycle.md](../concepts/lifecycle.md#store-and-intents), [spec §9](../specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery)).
 
 ## Container runtime
 
@@ -72,7 +72,7 @@ All secrets live in the read-only `secrets` mount (macOS colima profile: `~ddf/.
 | Secret | Used by | Enters containers |
 |---|---|---|
 | GitHub App private keys (`worker`, `review-correctness`, `review-security`) | token broker on the host | never |
-| Review-signing key (HMAC) | daemon only | never |
+| Review-signing key (Ed25519 private key) | daemon only | never |
 | Telegram bot token | `notify-telegram` | never |
 | Agent CLI tokens and provider keys | agent adapters | yes, only the routed adapter's credential: a subscription token that cannot be proxied, an accepted risk ([security-model.md](security-model.md#accepted-risks)), or for a pay-per-token provider entry the per-run token from the credential source, never the real key; the operator does not load such a key until the per-run token implementation of the credential source exists ([§15](security-model.md#accepted-risks)) |
 

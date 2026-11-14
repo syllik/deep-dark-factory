@@ -63,7 +63,7 @@ Rules:
 | Module | Responsibility |
 |---|---|
 | `model` | Types and versioned schemas: Task, Run, Change, Review, Finding, Question, Decision. Schema IDs `ddf.<name>/v1`. |
-| `store` | SQLite (embedded, through a cgo-free driver; §4.4) as the canonical state; append-only event journal; run leases; intents. |
+| `store` | SQLite (embedded, through a cgo-free driver; §4.4) as the canonical state; append-only event journal; intents. |
 | `lifecycle` | Pure transition functions for the task state machine (§5). |
 | `scheduler` | Admits runs against the host capacity (CPU, memory, disk) reported by the Sandbox port, with an operator override (§7.2); per-run limits come from the sizing rule (Issue #34). Zones, dependencies, priority order, global pause (a set of reasons, §9). |
 | `policy` | Risk classification, reviewer set, blocking rules, path policy, hard-stop detection, `evaluateMerge` (§6). Pure functions. |
@@ -96,13 +96,66 @@ Rules:
 
 ### 4.5 Store and intents
 
-Tables (indicative): `tasks`, `runs`, `changes`, `reviews`, `findings`, `questions`, `intents`, `leases`, `events`.
+The store is SQLite (§4.4) with the normative schema below.
 
 - Every **forge write** (create task, push, open/update change, post review, update branch, merge, revert, close/reopen task) writes an intent before the call and its outcome after.
 - Every forge object DDF creates carries a hidden task-key marker (`ddf:task-key=<key>`), so reconciliation finds it by key, not by branch name or title.
 - **Model runs are not intents.** A run interrupted by a restart is discarded and retried within the task's run budget (§5.3).
-- Task key: a digest of `{forge, repository, source kind, source id}`; every store row, lease and signature is scoped by it.
-- **Teardown record.** Per task, the store records that its run cell was destroyed and verified (Sandbox port, §4.2), with the time (indicative: a column on `tasks` or a `teardowns` row; decided in M2). Recovery (§9) writes the same record.
+- Task key: a digest of `{forge, repository, source kind, source id}`; every store row and signature is scoped by it.
+- **Teardown record.** Column `tasks.teardown_at`, set only when the task's run cell was destroyed and the destroy verified (Sandbox port, §4.2). Recovery (§9) writes the same column.
+
+#### Schema file and version
+
+One schema file, `internal/core/store/schema.sql`, embedded with `embed`, plus a table `schema_version` holding one row with an integer version. On open:
+- an empty database gets the schema and the version;
+- an equal version opens;
+- any other version refuses to open, with an error naming both versions, and the file is never changed.
+
+Until the first real install the file is edited freely and the version bumped. Ordered migrations under `internal/core/store/migrations/` start in M5.
+
+#### SQLite settings
+
+- `journal_mode=WAL`, `synchronous=FULL`, `foreign_keys=ON`, `busy_timeout=5000` ms, set on every connection and read back after open; a mismatch fails the open.
+- One writer: one database handle per process with at most one open connection; `ddfd`'s instance lock keeps one process per host.
+
+#### SQL rules
+
+- Values only as bound parameters, never string-built SQL; table and column names are constants.
+- Each state change is one transaction (`BEGIN IMMEDIATE`) that also appends its event.
+- An intent row is committed in its own transaction before the forge call, and its outcome in a later one.
+- `events` has no UPDATE or DELETE path: triggers abort both.
+- Every enum column is read as text and decoded through the model `Parse` function of its type; an unknown value is an error, never a default (#73).
+- Times are INTEGER Unix milliseconds UTC from the clock port.
+- A value that the store filters, orders, joins or constrains on is a column. Everything else lives in a JSON payload column whose object carries its schema ID `ddf.<name>/v1` (OD-8); an unknown schema ID fails the read.
+
+#### Tables
+
+Table (key): columns; payload.
+- `tasks` (`task_key`): `forge`, `repository`, `source_kind`, `source_id` (unique together); `kind` `task|request|followup`; `parent_key` (request→child, parent→follow-up; nullable, references `tasks`); `state`; `flag_needs_owner`, `flag_hold`, `flag_failed`; `risk` (nullable); `priority` `high|normal|low`, default `normal`; `hit_stop` (0/1, sticky: set when the task hit a hard stop or path policy, never cleared; a trigger aborts clearing); `created_at`, `updated_at`, `teardown_at` (nullable). Payload `ddf.task/v1`: title, spec, acceptance, zones, dependsOn, agent defaults, planner risk proposal.
+- `runs` (`run_id`): `task_key`; `role`; `purpose` `planning|initial|correction|sync|ci-fix|review`; `revision` (nullable); `attempt` (1 or 2, the invalid-result retry); `head_sha` (nullable); `status`; `provider` (from the routing entry; read by `r2DifferentProvider`); `failure_class` `credential|rate-limited|retryable|fatal` (nullable); `started_at`, `finished_at`. Payload `ddf.run/v1`: full routing entry, usage, result and patch digests, redacted error.
+- `changes` (`task_key`, `change_id`): `kind` `change|revert`; `branch`; `base_branch`; `head_sha`; `revision`; `open`; `draft`; `patch_id`; `merge_sha`, `merged_at` (nullable; the revert window); `ci_since` (CI wait start for the current head); `created_at`, `updated_at`. Payload `ddf.change/v1`.
+- `base_merges` (`task_key`, `change_id`, `merge_sha`): `base_sha`, `parent_head_sha`, `intent_id`, `created_at`. These are the daemon-created base merges of §6.6 rule 4.
+- `reviews` (`review_id`): `task_key`; `change_id`; `role`; `head_sha`; `round`; `verdict`; `blocking_count`; `findings_digest`; `raise_risk` (nullable); `sig_version`; `key_id`; `signature`; `run_id`; `created_at`. Payload `ddf.review/v1`: hard-stop checklist, summary.
+- `findings` (`review_id`, `finding_id`): `task_key`; `role`; `head_sha`; `severity`; `category`; `security_level` (nullable); `blocking`; `prior_id` (nullable; filled once the reviewer schema carries it, Task 16); `routed` `fixing|followup|minors` (nullable). Payload: evidence, location, fixHint, wontFix reason.
+- `questions` (`question_id`): `task_key`; `category`; `asked_at`; `answered_at`; `answer_actor`. Payload: question text, paths, answer text.
+- `intents` (`intent_id`): `task_key`; `operation` `create-task|push|open-change|update-change|post-review|update-branch|merge|revert|close-task|reopen-task`; `status`; `dry_run`; `created_at`; `resolved_at`. Payload `ddf.intent/v1`: the call's arguments and the evidence reconciliation needs (task-key marker, target ref, expected old SHA, head SHA), then the outcome (forge object ID, new SHA, error class). Index on pending.
+- `events` (`seq`, autoincrement): `task_key` (null only for global events); `type`; `at`. Payload `ddf.event/v1` with the §8.6 audit fields: role, identity and permission set, token expiry (never the token), commits, model, usage.
+- `pause_reasons` (`reason`): `set_at`; payload detail.
+- `cooling` (`entry_id`, a digest of the routing entry): `until`; `notified_at`.
+- `flakes` (`test_id`, `task_key`, `change_id`): `head_sha`; `seen_at`.
+
+Derived, not stored:
+- the §5.3 counters (runs per task; correction and sync batches per change; CI-fix attempts per revision; invalid-result retries), counted from `runs`;
+- held zones, from `tasks.state`;
+- revert-red attribution, from `changes` of kind `revert` by `created_at`.
+
+#### Leases
+
+V1 has no run leases (dropped 2026-11-14). The instance lock plus recovery by label (§9) cover what a lease would protect; the M3 re-adoption work decides whether a lease returns.
+
+#### Model types
+
+Task 3 of the M2 plan (`docs/plans/2026-11-05-m2-offline-core.md`) adds the fields above to the model record types.
 
 ## 5. Task lifecycle
 
@@ -126,11 +179,11 @@ flags (off the conveyor): needs-owner, hold, failed; global: paused (reasons: ow
 
 **waiting:** a `ready` task whose dependencies are open, or whose zones are held, waits. A zone is held from `running` until the holding task is merged or leaves the conveyor. Two tasks overlapping in files outside any declared zone: the second is synced with the base (§5.2 Sync) after the first merges.
 
-**Priority order** when a slot frees: tasks already in `fixing` or `merge`, then `ci`/`review` work, then `ready` tasks by priority (forge label `priority:high|normal|low`, default normal), then by satisfied dependencies, then oldest first; follow-ups last.
+**Priority order** when capacity frees: tasks already in `fixing` or `merge`, then `ci`/`review` work, then `ready` tasks by priority (forge label `priority:high|normal|low`, default normal), then by satisfied dependencies, then oldest first; follow-ups last.
 
 **Executor** runs in a container on a workspace copy, may use subagents, runs the profile's verify inside the container, and exports a patch (§8.3). Verdicts: `COMPLETE` → `publishing`; `BLOCKED` → `needs-owner`.
 
-**Publisher (trusted code)** applies the patch to a clean clone (§8.3), checks path policy and risk class, runs the local gate in a fresh container, makes one commit and one push per revision (no force-push, rebase or amend), and opens or updates the change. It writes the change body and the squash message itself from a template: agent text is included only in a sanitized section (closing keywords, `[skip ci]`-style directives and mentions stripped), and `Closes <task>` is added by DDF only for the task itself. Local gate failure → back to the Executor as a correction batch.
+**Publisher (trusted code)** applies the patch to a clean clone (§8.3), checks path policy and risk class, runs the local gate in a fresh container, makes one commit and one push per revision (no force-push, rebase or amend), and opens or updates the change. It writes the change body and the squash message itself from a template: agent text is included only in a sanitized section (closing keywords, `[skip ci]`-style directives and mentions stripped), and `Closes <task>` is added by DDF only for the task itself. Local gate failure → back to the Executor as a correction batch. A revision whose applied tree matches a default hard-stop glob, a forbidden path or a symlink is not published: the task goes to `needs-owner` and `hit_stop` is set (§6.4, §6.5).
 
 **CI** (§6.6 required checks) on the current head. For `forge-local` the daemon runs verify in a fresh container as CI. One automatic rerun per head; pass-on-rerun is recorded as a flake; a test flaking in two changes produces a `needs-owner` quarantine proposal (never an auto-executed task). CI failure → Executor CI-fix attempt.
 
@@ -147,7 +200,7 @@ flags (off the conveyor): needs-owner, hold, failed; global: paused (reasons: ow
 | behind base | sync |
 | checks missing/pending/red | `ci` |
 | review missing/stale/not approved | `review` |
-| path policy or hard stop | `needs-owner`, task drops to `propose` (§6.4) |
+| hard stop or path policy on the current head (for example a commit DDF did not publish) | `needs-owner`; the change stays at `propose` (§6.4) |
 | flag or global pause | stay |
 | change converted to draft or closed by a human | `hold`, notify |
 | task closed by a human | leaves the conveyor; open change left for the human |
@@ -189,10 +242,60 @@ Effective level per §3. No level promotes to production.
 | Class | Condition (deterministic) | Reviewers |
 |---|---|---|
 | `docs` | only `risk.docs` paths; agent-instruction files are never `docs` | R1 |
-| `low` | code, changed lines ≤ `risk.lowMaxLines` (default 200, lockfiles and pure renames excluded from the count), no `risk.sensitive` or hard-stop path | R1 |
+| `low` | code, changed lines ≤ `risk.lowMaxLines` (default 200, counted as below), no `risk.sensitive` or hard-stop path | R1 |
 | `standard` | other code | R1 + R2 |
-| `sensitive` | any `risk.sensitive` path (money, keys, auth, data, migrations) or default hard-stop globs (deploy, infrastructure, container files, IaC) | R1 + R2, R2 at `deep` |
+| `sensitive` | any `risk.sensitive` path (money, keys, auth, data, migrations) or the default hard-stop globs (§6.4) | R1 + R2, R2 at `deep` |
 | `revert` | an exact revert of one DDF merge commit, produced by DDF | R1 |
+
+**Changed lines** (rationale and examples: [policy.md](../concepts/policy.md#changed-lines)):
+1. The count comes from `git diff --numstat -M` between the merge base of the integration branch and the change head, and the head: the whole change, with daemon base merges excluded by the moved merge base.
+2. Changed lines = added + deleted lines, summed over counted files.
+3. Lockfiles (list below) are not counted.
+4. A pure rename (similarity 100%) counts 0; a rename with edits counts only its added and deleted lines.
+5. Any binary file added, changed or deleted makes the change exceed `risk.lowMaxLines`.
+6. A mode-only change counts 0.
+7. Every path rule (docs, sensitive, `ciEntrypoints`, hard-stop globs, forbidden, agent-instruction files) matches both the old and the new path of a rename.
+
+**Lockfiles**, a fixed product list, not a profile key in V1:
+<!-- sync:lockfiles -->
+- `**/package-lock.json`
+- `**/npm-shrinkwrap.json`
+- `**/yarn.lock`
+- `**/pnpm-lock.yaml`
+- `**/bun.lock`
+- `**/bun.lockb`
+- `**/go.sum`
+- `**/Cargo.lock`
+- `**/poetry.lock`
+- `**/Pipfile.lock`
+- `**/uv.lock`
+- `**/Gemfile.lock`
+- `**/composer.lock`
+- `**/mix.lock`
+- `**/pubspec.lock`
+- `**/Package.resolved`
+- `**/packages.lock.json`
+- `**/gradle.lockfile`
+- `**/flake.lock`
+<!-- /sync:lockfiles -->
+
+**Agent-instruction files** are never `docs`; they are classed by the code rows:
+<!-- sync:agent-instruction-files -->
+- `**/AGENTS.md`
+- `**/CLAUDE.md`
+- `**/GEMINI.md`
+- `**/SKILL.md`
+- `**/.cursorrules`
+- `**/.windsurfrules`
+- `**/.github/copilot-instructions.md`
+- `**/.agents/**`
+- `**/.claude/**`
+- `**/.codex/**`
+- `**/.cursor/**`
+- `**/.opencode/**`
+- `**/.mcp.json`
+- `**/opencode.json`
+<!-- /sync:agent-instruction-files -->
 
 The class is computed from the diff and the profile. The Planner may raise it; R1 may raise it (adds R2). Nothing lowers it. When R2 is not in the set, R1 also runs the hard-stop checklist.
 
@@ -202,7 +305,30 @@ The class is computed from the diff and the profile. The Planner may raise it; R
 
 ### 6.4 Hard stops
 
-Always `needs-owner`: secrets and credentials, deploy and infrastructure, real money, destructive data operations, forge or repository settings, other repositories, purchases. Projects add categories and path globs. A change that hit a hard stop or path policy is never merged autonomously, even after an owner answer: it continues at `propose`.
+Always `needs-owner`: secrets and credentials, deploy and infrastructure, real money, destructive data operations, forge or repository settings, other repositories, purchases.
+
+Default hard-stop globs (deploy, infrastructure, container files, IaC):
+<!-- sync:hard-stop-globs -->
+- `Dockerfile*`
+- `**/Dockerfile*`
+- `docker-compose*.y*ml`
+- `**/*.tf`
+- `**/*.tfvars`
+- `k8s/**`
+- `helm/**`
+- `deploy/**`
+- `infra/**`
+- `.terraform/**`
+- `ansible/**`
+<!-- /sync:hard-stop-globs -->
+
+Flow:
+- A change whose applied tree matches a default hard-stop glob is not published. The task goes to `needs-owner` (category and paths) before publishing, and `hit_stop` is set.
+- After the owner's answer, the Publisher publishes that revision and the task continues at `propose` (human merge); an owner who does not want it closes the task.
+- A hard stop found on a published head maps to the refusal row of §5.2 Merge.
+- Projects add hard-stop categories (`hardStops`), which the reviewers' hard-stop checklist covers. V1 has no project hard-stop glob key; a project uses `forbidden` or `risk.sensitive` for paths.
+
+A change that hit a hard stop or path policy is never merged autonomously, even after an owner answer: it continues at `propose`.
 
 ### 6.5 Path policy
 
@@ -220,6 +346,8 @@ The project's `ciEntrypoints` (scripts and manifests CI relies on, e.g. `package
 
 Evaluated from the integration branch copy of the profile, never from the change itself. Projects add more.
 
+A change touching a forbidden path or symlink is refused by the Publisher and never published automatically (probe 3). The task goes to `needs-owner` and `hit_stop` is set. After the owner's answer it returns to `running` with the answer in the Executor brief; a revision that still touches a forbidden path is refused again. Forbidden paths change only in a human-merged change.
+
 ### 6.6 Merge gate
 
 `evaluateMerge` returns `MERGE` only if every condition holds; each refusal reason is an enumerated value with its own test:
@@ -235,7 +363,14 @@ Evaluated from the integration branch copy of the profile, never from the change
 
 The merge is pinned to the evaluated head (GitHub: merge with the `sha` parameter; `forge-local`: compare-and-swap ref update). A moved head fails the merge.
 
-**Review signatures:** HMAC-SHA256 with a key only the daemon holds, over the canonical JSON (sorted keys, UTF-8) of `{taskKey, forge, repository, changeId, head, role, verdict, blockingCount, findingsDigest}`, where `findingsDigest` is SHA-256 of the canonical JSON array of findings. The gate reads reviews from the store and verifies signatures; forge comments are a projection. On GitHub, reviewer Apps also submit native reviews (APPROVE / REQUEST_CHANGES) and re-approve after a sync.
+**Review signatures:** Ed25519 with a private key only the daemon holds (Secrets port), over the canonical JSON (sorted keys, UTF-8, integers, no floats) of `{version, keyId, taskKey, forge, repository, changeId, head, role, verdict, blockingCount, findingsDigest}`, where `findingsDigest` is SHA-256 of the canonical JSON array of findings.
+- `version` is the string `ddf.review-signature/v1`.
+- `keyId` is the lowercase hex of the first 16 bytes of SHA-256 over the raw 32-byte public key.
+- The signature is standard padded base64 of the 64-byte Ed25519 signature.
+- The gate rejects an unknown `version`, an unknown `keyId` or a bad signature (fail-closed).
+- Key rotation is M5.
+
+The gate reads reviews from the store and verifies signatures; forge comments are a projection. On GitHub, reviewer Apps also submit native reviews (APPROVE / REQUEST_CHANGES) and re-approve after a sync.
 
 ### 6.7 Project profile
 
@@ -415,7 +550,7 @@ Agent code runs in the project's CI. A project may be set to `merge-integration`
 
 **Tick:** every 60 s; forge polling with conditional requests (ETag). No webhooks in V1.
 
-**Recovery:** on start the daemon takes the instance lock and lists execution resources by label (Sandbox port, §4.2). Per task key and run ID from the labels: resources whose task is terminal or unknown to the store are destroyed and verified, and the teardown recorded (§4.5); resources of a non-terminal task are, in V1, killed and their run discarded (retried within budget). Re-adopting live runs later changes only that branch, not the port. An unverifiable teardown is reported (journal + notification). The daemon then reconciles every unresolved forge intent by task-key marker (e.g. a change for the task already exists → adopt it). Unreconcilable intents → `needs-owner`; never a blind retry of a forge write.
+**Recovery:** on start the daemon takes the instance lock and lists execution resources by label (Sandbox port, §4.2). Per task key and run ID from the labels: resources whose task is terminal or unknown to the store are destroyed and verified, and the teardown recorded (§4.5); resources of a non-terminal task are, in V1, killed and their run discarded (retried within budget). Re-adopting live runs lands in M3 (#43 decision 5) and changes only that branch, not the port. An unverifiable teardown is reported (journal + notification). The daemon then reconciles every unresolved forge intent by task-key marker (e.g. a change for the task already exists → adopt it). Unreconcilable intents → `needs-owner`; never a blind retry of a forge write.
 
 | Failure | Reaction |
 |---|---|
@@ -424,7 +559,7 @@ Agent code runs in the project's CI. A project may be set to `merge-integration`
 | container runtime unavailable (the daemon's restart attempts failed, or isolation rules absent or unverifiable after one re-apply following an observed runtime restart or a probe failure with unchanged rules; §8.4) | global pause (reason `runtime`), notify; `runtime` is lifted automatically, with a notification, once health check, isolation-rule check and probes pass again |
 | isolation rules absent or changed while no runtime restart was observed (§8.4), even when a re-apply would succeed | global pause (reason `security`), notify; no automatic lift |
 | agent authentication failure (§7.3) | global pause (reason `credential`), notify; no automatic lift |
-| host sleep | the daemon's supervisor restarts it; expired leases are released |
+| host sleep | the daemon's supervisor restarts it; recovery runs as above |
 
 **Run logs:** in the `data` mount (macOS colima profile default: `~ddf/runs/<task>/<run>/`): brief, result, sanitized CLI output; kept 30 days; secrets redacted by pattern and by loaded secret values (§8.4) before writing.
 
@@ -433,8 +568,10 @@ Agent code runs in the project's CI. A project may be set to `merge-integration`
 ### 10.1 `forge-local`
 
 - Remote: any Git URL (`file://` bare repository or `ssh://`).
-- Tasks and requests: `ddf ask` or task files; stored in the DDF store; allow-list = local operator.
-- Change: a branch; reviews and findings in the store; merge by the gate with a compare-and-swap ref update.
+- Tasks and requests: `ddf ask` or task files; allow-list = local operator.
+- Tasks, requests, answers, review projections and check results live in `forge-local`'s own storage: plain files in a directory of its own, never the DDF store and never through the `store` package, which no adapter imports (#43 decision 7). The file format is defined with plan Task 10.
+- The DDF store holds DDF's own canonical rows, signed reviews included, exactly as on any forge.
+- Change: a branch; merge by the gate with a compare-and-swap ref update.
 - CI: verify in a fresh container.
 - Used for fully offline operation and as the forge of DDF's own end-to-end tests.
 
@@ -475,7 +612,7 @@ templates/project/  .ddf/project.yaml, issue forms (task, request, bug), AGENTS.
 
 ## 12. DDF's own profile
 
-DDF is a pilot of itself (D1). Its profile marks every security-relevant area as `sensitive` (R1 + R2, R2 at `deep`): `internal/core/policy/**`, `internal/core/lifecycle/**`, `internal/core/workspace/**` (hook neutralisation, patch apply), `internal/core/store/migrations/**`, `internal/daemon/**` (it drives the gate, the merge and the intents), `cmd/ddfd/**` (the daemon's entry point: it wires the adapters, the secrets and the lock), the Publisher `internal/core/publisher/**` (sanitizer, path checks), the token broker, the review-signature code, `internal/adapters/agent/**` (settings isolation, read-only tools), `internal/adapters/sandbox/**` (firewall), the merge code in `internal/adapters/forge/**`, `prompts/**`, `schemas/**` and every forbidden path. Its `ciEntrypoints` are `scripts/docs-check.mjs` and, when they exist, `go.mod`, `go.sum` and `test/boundaries/**`. Until DDF has its own project file, the working copy of this profile is in [manual mode](../orchestrator/manual-mode.md#ddfs-own-profile-until-ddfprojectyaml-exists). Combined with §4.4 (the daemon runs only from a maintainer-promoted ref), an autonomously merged change to DDF cannot alter the running factory until a human promotes it.
+DDF is a pilot of itself (D1). Its profile marks these paths `sensitive` (R1 + R2, R2 at `deep`): the gate `internal/core/policy/gate/**`, the review signatures `internal/core/policy/signature/**`, the merge code in `internal/adapters/forge/**`, patch apply `internal/core/workspace/patch/**` and the Publisher `internal/core/publisher/**` (sanitizer, path checks). Also kept, for paths with no M2 code, for their milestone: `internal/core/store/migrations/**` (M5), `cmd/ddfd/**` (the daemon's entry point; owner decision 2026-11-12), the token broker (M4), `internal/adapters/agent/**` (M3) and `internal/adapters/sandbox/docker/**` (M3); and `prompts/**`, `schemas/**` and every forbidden path. Other code takes the default size rules (§6.2). One deep security review of the integrated core at M2 exit (#43 decision 10). Its `ciEntrypoints` are `scripts/docs-check.mjs` and, when they exist, `go.mod`, `go.sum` and `test/boundaries/**`. Until DDF has its own project file, the working copy of this profile is in [manual mode](../orchestrator/manual-mode.md#ddfs-own-profile-until-ddfprojectyaml-exists). Combined with §4.4 (the daemon runs only from a maintainer-promoted ref), an autonomously merged change to DDF cannot alter the running factory until a human promotes it.
 
 ## 13. Migration
 
@@ -503,10 +640,10 @@ DDF is a pilot of itself (D1). Its profile marks every security-relevant area as
 |---|---|---|---|
 | M0 Prep | Local workspace cleanup (separate track). Fact check (§16). | Answers recorded in `.ai/decisions.md` | maintainer |
 | M1 Docs | This spec, `docs/` (concepts, orchestrator, operator skeleton), `prompts/`, `schemas/`, new `AGENTS.md`, issue closures | An interactive session can run a DDF task by `manual-mode` alone | maintainer |
-| M2 Offline core | `model`, `store`, `lifecycle`, `policy`, `scheduler`, `workspace`, `forge-local`, `sandbox-fake`, fake agent; import-boundary test; hosted CI | Full lifecycle (intake → merge, fixing, sync, gate refusals, revert, restart recovery) passes in tests with fakes | maintainer |
-| M3 Real execution | `sandbox-docker`, base image, isolation rules, `context`, `agent-claude-code`, `agent-opencode` | One real task on a fixture repository through `forge-local` with a real model, both adapters; isolation probes pass | maintainer |
+| M2 Offline core | Walking skeleton first; `model`, `store`, `lifecycle`, `policy`, `scheduler`, `workspace`, `forge-local`, `sandbox-fake`, fake agent; import-boundary test; hosted CI | Full lifecycle (intake → merge, fixing, sync, gate refusals, revert, restart recovery) passes in tests with fakes, and one deep security review of the integrated core | maintainer |
+| M3 Real execution | `sandbox-docker`, base image, isolation rules, `context`, `agent-claude-code`, `agent-opencode`; re-adoption of live runs and drain on upgrade; internal events beside the tick | One real task on a fixture repository through `forge-local` with a real model, both adapters; isolation probes pass | maintainer |
 | M4 GitHub + channel | `forge-github` (`apps create`, token broker, intake actors, PRs, reviews, pinned merge, labels), CLI (`notify-cli`); `notify-telegram` deferred to V1.1 | Dry-run against a sandbox repository: correct reads, intended writes logged, no writes performed | maintainer |
-| M5 Install + pilot | Linux container profile (control-plane container, `ddf` host user, three mounts), operator config, secrets; macOS colima profile (`ddf` user, launchd) as the second profile; 24 h dry run on DDF; DDF at `merge-integration`; pilot product profile PR and CI prerequisites; Telegram deferred to V1.1 | §14.1 acceptance on a small always-on arm64 Linux host | maintainer until DDF autonomy is on |
+| M5 Install + pilot | Linux container profile (control-plane container, `ddf` host user, three mounts), operator config, secrets; macOS colima profile (`ddf` user, launchd) as the second profile; 24 h dry run on DDF; DDF at `merge-integration`; pilot product profile PR and CI prerequisites; Telegram deferred to V1.1; store migrations start; store backup and restore; review-signing key rotation | §14.1 acceptance on a small always-on arm64 Linux host | maintainer until DDF autonomy is on |
 | M6 Retire | Archive the old workflow repository; remove routing blocks elsewhere; replace standalone agent role configs | No repository references the old canon | DDF / maintainer |
 
 Each milestone gets its own implementation plan.
@@ -618,3 +755,14 @@ Answers, evidence and probe definitions: `docs/research/2026-11-m0-facts.md`; de
 - 2026-11-11 Issue #49: §8.3, §9 — daemon clones and run logs in the `data` mount; `~ddf/work`, `~ddf/runs` are macOS colima profile defaults
 - 2026-11-11 Issue #50: §14 — M4 row: `notify-telegram` deferred to V1.1, as in D9 and §4.2 (minor from PR #48)
 - 2026-11-12 Issue #39: §12 — `cmd/ddfd/**` added to the `sensitive` paths (owner choice, see docs/orchestrator/manual-mode.md#ddfs-own-profile-until-ddfprojectyaml-exists)
+- 2026-11-14 Issue #74: §4.1 — run leases dropped from the `store` row (#43 audit P1-3, see .ai/decisions.md)
+- 2026-11-14 Issue #74: §4.5 — normative store schema: schema file and version, SQLite settings, SQL rules, tables with keys and columns, derived counters; teardown record is `tasks.teardown_at`; V1 has no run leases (#43 audit P1-3)
+- 2026-11-14 Issue #74: §5.2 — priority order runs when capacity frees; Publisher does not publish a hard-stop, forbidden-path or symlink revision; merge-refusal row for a hard stop or path policy on the current head
+- 2026-11-14 Issue #74: §6.2 — changed-lines rule; fixed lockfile and agent-instruction-file lists as sync blocks; `sensitive` row names the default hard-stop globs (#43 audit P1-4, see docs/concepts/policy.md#changed-lines)
+- 2026-11-14 Issue #74: §6.4 — default hard-stop globs as a sync block; hard-stop flow (needs-owner before publishing, sticky `hit_stop`, publish at `propose` after the owner's answer); projects add categories only (#43 audit P1-4)
+- 2026-11-14 Issue #74: §6.5 — a forbidden-path or symlink change is never published automatically; flow after the owner's answer
+- 2026-11-14 Issue #74: §6.6 — review signatures: Ed25519 replaced HMAC-SHA256; payload carries `version` and `keyId`; keyId derivation, base64 encoding, fail-closed on unknown version or keyId; key rotation in M5 (#43 audit P1-1)
+- 2026-11-14 Issue #74: §9 — re-adoption of live runs lands in M3; host sleep row no longer releases leases
+- 2026-11-14 Issue #74: §10.1 — `forge-local` keeps its own storage outside the DDF store; no adapter imports the store (#43 decision 7, audit P1-1)
+- 2026-11-14 Issue #74: §12 — `sensitive` paths narrowed to the gate, signatures, forge merge code, patch apply and Publisher, plus paths kept for their milestone; one deep security review at M2 exit (#43 decision 10, audit P1-1; see docs/orchestrator/manual-mode.md#ddfs-own-profile-until-ddfprojectyaml-exists)
+- 2026-11-14 Issue #74: §14 — M2 walking skeleton and exit security review; M3 re-adoption, drain on upgrade, internal events beside the tick; M5 store migrations, backup and restore, review-signing key rotation

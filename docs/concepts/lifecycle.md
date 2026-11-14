@@ -53,7 +53,7 @@ The [Planner](roles.md#planner) returns one verdict:
 - A zone is held from `running` until the holding task is merged or leaves the conveyor.
 - Two tasks overlapping in files outside any declared zone: the second is synced with the base (see [sync](#sync-with-base)) after the first merges.
 
-**Priority order** when a slot frees:
+**Priority order** when capacity frees:
 
 1. tasks already in `fixing` or `merge`;
 2. `ci` / `review` work;
@@ -86,6 +86,7 @@ The [Publisher](roles.md#publisher) (trusted code):
 The Publisher writes the change body and squash message from a template; agent text appears only in a sanitized section (closing keywords, `[skip ci]`-style directives and mentions stripped); `Closes <task>` is added by DDF only for the task itself. Local gate failure → back to the Executor as a correction batch.
 
 - **Redaction before publication.** Before every forge write and every notification send, all agent-originated text (review projection comments, change body, commit message, patch content, Telegram messages) is redacted by secret patterns and by the exact values of the secrets loaded into that run's container. A patch containing a loaded secret value is refused: hard stop `secrets` ([policy.md](policy.md#hard-stops)), failed run.
+- **Hard stops and forbidden paths.** A change whose applied tree matches a default hard-stop glob is not published: `needs-owner` before publishing, `hit_stop` set; after the owner's answer the Publisher publishes that revision and the task continues at `propose`. A change touching a forbidden path or symlink is never published automatically: `needs-owner`, `hit_stop` set, and after the answer the task returns to `running`. `hit_stop` is sticky ([policy.md](policy.md#hard-stops), [policy.md](policy.md#forbidden-paths)).
 - The Publisher refuses a patch that adds a `.opencode/` or `.claude/` path (already a [forbidden path](policy.md#forbidden-paths)) or any `node_modules/` path unless the project profile allows it: failed run, with the reason in the journal.
 
 Rationale: [spec §8.3](../specs/2026-11-03-ddf-v1-design.md#83-workspaces-and-publication), [spec §8.4](../specs/2026-11-03-ddf-v1-design.md#84-containers).
@@ -145,7 +146,7 @@ Gate refusals map to transitions ([spec §5.2](../specs/2026-11-03-ddf-v1-design
 | behind base | sync |
 | checks missing/pending/red | `ci` |
 | review missing/stale/not approved | `review` |
-| path policy or hard stop | `needs-owner`, task drops to `propose` (§6.4) |
+| hard stop or path policy on the current head (for example a commit DDF did not publish) | `needs-owner`; the change stays at `propose` (§6.4) |
 | flag or global pause | stay |
 | change converted to draft or closed by a human | `hold`, notify |
 | task closed by a human | leaves the conveyor; open change left for the human |
@@ -166,13 +167,14 @@ Gate refusals map to transitions ([spec §5.2](../specs/2026-11-03-ddf-v1-design
 
 Rationale: [spec §9](../specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery), [spec §8.4](../specs/2026-11-03-ddf-v1-design.md#84-containers).
 
-## Store, intents and leases
+## Store and intents
 
-- **Store:** the canonical state (SQLite), with an append-only event journal; tables (indicative) `tasks`, `runs`, `changes`, `reviews`, `findings`, `questions`, `intents`, `leases`, `events`. Every store row, lease and signature is scoped by the task key, a digest of `{forge, repository, source kind, source id}`.
-- **Teardown record:** the store records per task that its execution cell was destroyed and verified (nothing labelled with the task key remains), with the time. Indicative, like the tables above (for example a column on `tasks` or a `teardowns` row); the concrete table or column is decided in M2. An unverifiable teardown is a reported failure (journal and notification), never silent.
+- **Store:** the canonical state (SQLite), with an append-only event journal. Tables, columns, payloads, SQLite settings and SQL rules: [spec §4.5](../specs/2026-11-03-ddf-v1-design.md#45-store-and-intents). Every store row and signature is scoped by the task key, a digest of `{forge, repository, source kind, source id}`.
+- **Teardown record:** the column `tasks.teardown_at`, set only when the task's execution cell was destroyed and verified (nothing labelled with the task key remains). An unverifiable teardown is a reported failure (journal and notification), never silent.
 - **Intent:** every forge write (create task, push, open/update change, post review, update branch, merge, revert, close/reopen task) writes an intent before the call and its outcome after. Every forge object DDF creates carries a hidden task-key marker (`ddf:task-key=<key>`). Model runs are not intents.
-- **Lease:** a run lease held in the store, scoped by task key. After host sleep the daemon's supervisor restarts it and expired leases are released.
 - **Recovery:** on start the daemon takes the instance lock and lists execution resources by label (task key, run ID). Resources whose task is terminal or unknown to the store are destroyed and verified, and the teardown is recorded. Resources of a non-terminal task are, in V1, killed and their run discarded (retried within the run budget); the decision is per task key and run ID from the labels, so re-adopting live runs later changes only this branch. The daemon then reconciles every unresolved intent by task-key marker (for example, a change for the task already exists → adopt it). Unreconcilable intents → `needs-owner`; never a blind retry of a forge write.
+
+V1 has no run leases: the instance lock and recovery by label cover restarts ([spec §4.5](../specs/2026-11-03-ddf-v1-design.md#45-store-and-intents)).
 
 Rationale: [spec §4.5](../specs/2026-11-03-ddf-v1-design.md#45-store-and-intents), [spec §9](../specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery), [spec §4.1](../specs/2026-11-03-ddf-v1-design.md#41-core-no-network-no-forge-no-provider).
 

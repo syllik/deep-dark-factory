@@ -27,8 +27,8 @@ A store record written before every forge write and completed with its outcome a
 See [spec §4.5](specs/2026-11-03-ddf-v1-design.md#45-store-and-intents), [spec §9](specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery).
 
 **lease**
-A run lease held in the store, scoped by task key like every store row. When the daemon is restarted after host sleep, expired leases are released.
-See [lifecycle.md#store-intents-and-leases](concepts/lifecycle.md#store-intents-and-leases), [spec §4.1](specs/2026-11-03-ddf-v1-design.md#41-core-no-network-no-forge-no-provider), [spec §4.5](specs/2026-11-03-ddf-v1-design.md#45-store-and-intents), [spec §9](specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery).
+Not used in V1 (dropped 2026-11-14): there are no run leases. The instance lock and recovery by label cover restarts; the M3 re-adoption work decides whether a lease returns.
+See [spec §4.5](specs/2026-11-03-ddf-v1-design.md#45-store-and-intents), [lifecycle.md#store-and-intents](concepts/lifecycle.md#store-and-intents), [spec §9](specs/2026-11-03-ddf-v1-design.md#45-store-and-intents), [spec §9](specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery).
 
 **manual mode**
 The procedure an interactive LLM session follows to run one DDF task without the daemon, keeping the same lifecycle, roles, bounds and policy; a human merges. DDF itself is built this way until M5.
