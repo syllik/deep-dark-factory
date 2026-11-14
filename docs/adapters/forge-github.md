@@ -65,7 +65,7 @@ App private keys live in the secrets directory ([setup.md](../operator/setup.md#
 ## Reviews
 
 - Each reviewer App submits a native review (`APPROVE` / `REQUEST_CHANGES`) and a signed marker comment. Reviewer Apps re-approve after a sync.
-- The merge gate reads reviews from the store and verifies HMAC signatures; GitHub reviews and comments are a projection ([policy.md](../concepts/policy.md#merge-gate)).
+- The merge gate reads reviews from the store and verifies Ed25519 signatures (key ID and version); GitHub reviews and comments are a projection ([policy.md](../concepts/policy.md#merge-gate)).
 
 ## Merge
 

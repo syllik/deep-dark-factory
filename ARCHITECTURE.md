@@ -9,9 +9,9 @@ Status: normative (summary of spec §4; the spec wins on any difference).
 The core has no network, forge or provider access. Modules:
 
 - `model`: versioned types and schemas (Task, Run, Change, Review, Finding, Question, Decision; IDs `ddf.<name>/v1`).
-- `store`: SQLite as the canonical state, append-only event journal, run leases, intents.
+- `store`: SQLite as the canonical state, append-only event journal, intents.
 - `lifecycle`: pure transition functions of the task state machine.
-- `scheduler`: run slots, zones, dependencies, priority order, global pause (a set of reasons).
+- `scheduler`: admission against host capacity (Issue #34) with an optional count cap, zones, dependencies, priority order, global pause (a set of reasons).
 - `policy`: risk classification, reviewer set, blocking rules, path policy, hard stops, `evaluateMerge`. Pure functions.
 - `workspace`: daemon-owned clean clones, per-run copies, patch export/apply. Never executes repository content on the host.
 - `context`: bounded per-role briefs built from the integration branch.

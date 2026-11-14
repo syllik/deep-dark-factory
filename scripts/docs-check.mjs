@@ -122,47 +122,74 @@ for (const file of canon) {
   });
 }
 
-// (d) every marked forbidden-paths block equals the spec block, byte for byte per line.
-// Checked: docs/concepts/policy.md (block required) and every other Markdown file
-// under docs/, prompts/ and templates/ that contains a sync:forbidden marker.
-// Markers must be alone on their line and start at column 1.
-const OPEN = '<!-- sync:forbidden -->';
-const CLOSE = '<!-- /sync:forbidden -->';
-function syncBlock(r) {
+// (d) every named sync block equals the spec block of the same name, byte for byte per line.
+// Markers `<!-- sync:NAME -->` and `<!-- /sync:NAME -->`, NAME matching [a-z][a-z0-9-]*,
+// must be alone on their line and start at column 1. The spec is the source and holds
+// exactly one block per name (sync:forbidden required). docs/concepts/policy.md must hold
+// sync:forbidden and every block the spec holds (hard-stop-globs, lockfiles,
+// agent-instruction-files). Every other Markdown file under docs/, prompts/ and templates/
+// that contains a sync marker is checked for the blocks it holds. SYNC_DRIFT for a missing
+// block, a duplicate block in one file, a name the spec lacks, or a differing line.
+const MARKER = /^<!-- (\/?)sync:([a-z][a-z0-9-]*) -->$/;
+const isMarker = (l) => MARKER.test(l.trim());
+function syncBlocks(r, required = []) {
   const abs = join(root, r);
   if (!existsSync(abs)) { report(`SYNC_DRIFT ${r}:0 file missing`); return null; }
   const all = lines(read(abs));
   let misplaced = false;
   all.forEach((l, i) => {
     const t = l.trim();
-    if ((t === OPEN || t === CLOSE) && l !== t) {
+    if (isMarker(t) && l !== t) {
       misplaced = true;
       report(`SYNC_DRIFT ${r}:${i + 1} ${/^\s/.test(l) ? 'marker must start at column 1' : 'marker must not have trailing whitespace'}`);
     }
   });
   if (misplaced) return null;
-  const start = all.findIndex((l) => l === OPEN);
-  const end = all.findIndex((l, i) => i > start && l === CLOSE);
-  if (start === -1 || end === -1) { report(`SYNC_DRIFT ${r}:0 missing sync:forbidden markers`); return null; }
-  return { start, items: all.slice(start + 1, end) };
+  const blocks = new Map(); // name -> { start, items } of the first block with that name
+  let open = null;          // { name, start } of the block being read
+  const broken = new Set(); // names already reported as unbalanced
+  all.forEach((l, i) => {
+    const m = l.match(MARKER);
+    if (!m) return;
+    const [, slash, name] = m;
+    if (!slash) {
+      if (open) report(`SYNC_DRIFT ${r}:${i + 1} sync:${name} opened inside sync:${open.name}`);
+      open = { name, start: i };
+      return;
+    }
+    if (!open || open.name !== name) { broken.add(name); report(`SYNC_DRIFT ${r}:${i + 1} missing sync:${name} markers`); open = null; return; }
+    if (blocks.has(name)) report(`SYNC_DRIFT ${r}:${open.start + 1} duplicate sync:${name} block`);
+    else blocks.set(name, { start: open.start, items: all.slice(open.start + 1, i) });
+    open = null;
+  });
+  if (open) { broken.add(open.name); report(`SYNC_DRIFT ${r}:${open.start + 1} missing sync:${open.name} markers`); }
+  for (const name of required) {
+    if (!blocks.has(name) && !broken.has(name)) report(`SYNC_DRIFT ${r}:0 missing sync:${name} markers`);
+  }
+  return blocks;
 }
 const policyPath = 'docs/concepts/policy.md';
 const specPath = 'docs/specs/2026-11-03-ddf-v1-design.md';
-const spec = syncBlock(specPath);
+const spec = syncBlocks(specPath, ['forbidden']);
 const syncTargets = new Set([policyPath]);
 for (const file of ['docs', 'prompts', 'templates'].flatMap((d) => walk(join(root, d)))) {
   const r = rel(file);
   if (r === specPath || !r.endsWith('.md')) continue;
-  if (lines(read(file)).some((l) => l.trim() === OPEN || l.trim() === CLOSE)) syncTargets.add(r);
+  if (lines(read(file)).some(isMarker)) syncTargets.add(r);
 }
+const policyRequired = [...new Set(['forbidden', ...(spec?.keys() ?? [])])];
 for (const target of [...syncTargets].sort()) {
-  const block = syncBlock(target);
-  if (!block || !spec) continue;
-  const n = Math.max(block.items.length, spec.items.length);
-  for (let i = 0; i < n; i++) {
-    if (block.items[i] !== spec.items[i]) {
-      report(`SYNC_DRIFT ${target}:${block.start + 2 + i} expected ${JSON.stringify(spec.items[i] ?? '<end of block>')}`);
-      break;
+  const blocks = syncBlocks(target, target === policyPath ? policyRequired : []);
+  if (!blocks || !spec) continue;
+  for (const [name, block] of [...blocks].sort((a, b) => a[1].start - b[1].start)) {
+    const source = spec.get(name);
+    if (!source) { report(`SYNC_DRIFT ${target}:${block.start + 1} sync:${name} not in spec`); continue; }
+    const n = Math.max(block.items.length, source.items.length);
+    for (let i = 0; i < n; i++) {
+      if (block.items[i] !== source.items[i]) {
+        report(`SYNC_DRIFT ${target}:${block.start + 2 + i} expected ${JSON.stringify(source.items[i] ?? '<end of block>')}`);
+        break;
+      }
     }
   }
 }

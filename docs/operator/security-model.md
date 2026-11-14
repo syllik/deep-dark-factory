@@ -36,7 +36,7 @@ From [spec §8](../specs/2026-11-03-ddf-v1-design.md#8-identity-secrets-and-isol
 ## Authority
 
 - Human merge is the default (`propose`). Autonomous merge is limited to the integration branch, per project, and needs both the project request and the operator maximum ([policy.md](../concepts/policy.md#autonomy-levels)). No level promotes to production.
-- The merge gate is fail-closed and pinned to the evaluated head; reviews are HMAC-signed with a key only the daemon holds ([policy.md](../concepts/policy.md#merge-gate)).
+- The merge gate is fail-closed and pinned to the evaluated head; reviews are Ed25519-signed with a private key only the daemon holds ([policy.md](../concepts/policy.md#merge-gate)).
 - Hard stops and path policy always go to the owner, and such a change is never merged autonomously, even after an owner answer ([policy.md](../concepts/policy.md#hard-stops)).
 - Intake and owner answers are accepted only from allow-listed actors ([config-reference.md](config-reference.md#project)).
 
