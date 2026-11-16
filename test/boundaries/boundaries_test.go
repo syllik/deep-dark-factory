@@ -1,5 +1,5 @@
 // Package boundaries enforces the module import rules of spec §4.4 and plan
-// Task 2 Step 4 with go list over the four verify targets.
+// Task 2 Step 4 and Task 2d with go list over the four verify targets.
 package boundaries
 
 import (
@@ -35,6 +35,18 @@ var thirdPartyAllowlist = []struct{ pkg, module string }{
 	{"internal/core/model", "github.com/santhosh-tekuri/jsonschema/v6"},
 	{"internal/core/policy", "github.com/bmatcuk/doublestar/v4"},
 }
+
+// purePackages and pureForbidden are the core-pure rule: a non-test file of a
+// package under purePackages must not import a standard-library package under
+// pureForbidden (docs/development/code-conventions.md#purity-time-and-io,
+// audit P2-14).
+var purePackages = []string{
+	"internal/core/lifecycle",
+	"internal/core/policy",
+	"internal/core/scheduler",
+}
+
+var pureForbidden = []string{"math/rand", "log", "os"}
 
 type goListError struct{ Err string }
 
@@ -76,6 +88,8 @@ func TestUnder(t *testing.T) {
 		{"modernc.org/sqlite", "modernc.org/sqlite", true},
 		{"modernc.org/sqlite/lib", "modernc.org/sqlite", true},
 		{"modernc.org/sqlitex", "modernc.org/sqlite", false},
+		{"math/rand/v2", "math/rand", true},
+		{"logx", "log", false},
 	}
 	for _, tt := range tests {
 		if got := under(tt.p, tt.prefix); got != tt.want {
@@ -127,6 +141,13 @@ func TestBoundaries_Fixtures(t *testing.T) {
 		{"core-thirdparty", "internal/core/model", "modernc.org/sqlite"},
 		{"adapter-adapter", "internal/adapters/notify/b", v + "internal/adapters/forge/a"},
 		{"adapter-store", "internal/adapters/agent/c", v + "internal/core/store/schema"},
+		{"adapter-store", "internal/adapters/sandbox/d", v + "internal/core/store"},
+		{"core-pure", "internal/core/lifecycle", "math/rand"},
+		{"core-pure", "internal/core/lifecycle", "log"},
+		{"core-pure", "internal/core/policy/gate", "os"},
+		{"core-pure", "internal/core/policy/gate", "log/slog"},
+		{"core-pure", "internal/core/scheduler", "math/rand/v2"},
+		{"core-pure", "internal/core/scheduler", "os/signal"},
 		{"test-tree", "internal/daemon", v + "test/fakes"},
 		{"core-thirdparty", "internal/core/ids", "github.com/google/uuid"},
 		{"core-thirdparty", "internal/core/model", "github.com/bmatcuk/doublestar/v4"},
@@ -317,7 +338,7 @@ func check(t *testing.T, root, mainPath string, runs [][]*listedPackage) []entry
 			if under(r, "internal/adapters") && mod && under(rq, "internal/adapters") && !under(rq, adapterRoot(r)) {
 				add("adapter-adapter")
 			}
-			if under(r, "internal/adapters") && mod && under(rq, "internal/core/store") && rq != "internal/core/store" {
+			if under(r, "internal/adapters") && mod && under(rq, "internal/core/store") {
 				add("adapter-store")
 			}
 			if !under(r, "test") && mod && under(rq, "test") {
@@ -325,6 +346,9 @@ func check(t *testing.T, root, mainPath string, runs [][]*listedPackage) []entry
 			}
 			if under(r, "internal/core") && !mod && !std && !allowedThirdParty(r, q) {
 				add("core-thirdparty")
+			}
+			if std && underAny(r, purePackages) && underAny(q, pureForbidden) {
+				add("core-pure")
 			}
 		}
 	}
@@ -351,6 +375,11 @@ func adapterRoot(r string) string {
 		return r
 	}
 	return strings.Join(seg[:4], "/")
+}
+
+// underAny reports whether p is under any of prefixes.
+func underAny(p string, prefixes []string) bool {
+	return slices.ContainsFunc(prefixes, func(prefix string) bool { return under(p, prefix) })
 }
 
 func allowedThirdParty(r, q string) bool {
