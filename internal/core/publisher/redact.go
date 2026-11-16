@@ -32,10 +32,10 @@ func secretPatterns() []secretPattern {
 	p := func(name, expr string) secretPattern {
 		return secretPattern{name: name, re: regexp.MustCompile(expr), repl: redactedMark}
 	}
-	url := p("url-credentials", `\b([A-Za-z][A-Za-z0-9+.-]*://)[^\s/@:]+:[^\s/@]+@`)
+	url := p("url-credentials", `\b([A-Za-z][A-Za-z0-9+.-]*://)[^\s/@:]+:[^\s/]*@`)
 	url.repl = "${1}" + redactedMark + "@"
 	return []secretPattern{
-		p("private-key", `-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----)?`),
+		p("private-key", `-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----(?:[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----)?`),
 		p("github-token", `\bgh[pousr]_[A-Za-z0-9]{36,}\b`),
 		p("github-pat", `\bgithub_pat_[A-Za-z0-9_]{22,}\b`),
 		p("aws-access-key-id", `\b(?:AKIA|ASIA)[0-9A-Z]{16}\b`),
@@ -79,8 +79,8 @@ func (r Redactor) Format(f fmt.State, _ rune) {
 	_, _ = io.WriteString(f, redactorMark)
 }
 
-// loaded returns the loaded values, longest first, so a value that is a prefix
-// of another leaves no fragment.
+// loaded returns the loaded values, longest first, so a value that overlaps
+// another leaves no fragment.
 func (r Redactor) loaded() []string {
 	out := make([]string, 0, len(r.values))
 	for _, s := range r.values {
@@ -94,18 +94,14 @@ func (r Redactor) loaded() []string {
 
 // Redact replaces every occurrence of a loaded value, then every pattern
 // match, with [redacted]; url-credentials keeps the scheme and host. Values
-// are replaced only between existing [redacted] markers, so Redact is
+// are replaced one at a time, longest first, and only between existing
+// [redacted] markers, so overlapping values leave no fragment and Redact is
 // idempotent.
 func (r Redactor) Redact(s string) string {
-	if values := r.loaded(); len(values) > 0 {
-		pairs := make([]string, 0, 2*len(values))
-		for _, v := range values {
-			pairs = append(pairs, v, redactedMark)
-		}
-		rep := strings.NewReplacer(pairs...)
+	for _, v := range r.loaded() {
 		parts := strings.Split(s, redactedMark)
 		for i, p := range parts {
-			parts[i] = rep.Replace(p)
+			parts[i] = strings.ReplaceAll(p, v, redactedMark)
 		}
 		s = strings.Join(parts, redactedMark)
 	}

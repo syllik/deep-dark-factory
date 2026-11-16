@@ -27,7 +27,7 @@ func hostileChange() publisher.ChangeText {
 		TaskRef:        "#109",
 		Title:          "Fixes #2 publisher text test-secret-gamma",
 		Class:          model.RiskClassSensitive,
-		ChangedPaths:   []string{"b/closes #3.go", "a/`x`.go"},
+		ChangedPaths:   []string{"b/closes #3.go", "a/`x`.go", "c/`@org/team`.go"},
 		Verify:         []publisher.VerifyLine{{Command: "go test ./...", Passed: true}, {Command: "go vet ./...", Passed: false}},
 		RequiredChecks: []string{"verify", "docs"},
 		AgentNotes:     "Notes: closes #3 @alice [skip ci] <!-- ddf:x --> test-secret-gamma",
@@ -52,7 +52,7 @@ func TestRenderBody_RealTemplate(t *testing.T) {
 		{"one closing keyword", len(closingRef.FindAllString(got, -1)) == 1},
 		{"no placeholder", !strings.Contains(got, "{")},
 		{"loaded value only redacted", !strings.Contains(got, "test-secret-gamma") && strings.Count(got, "[redacted]") == 2},
-		{"summary", strings.Contains(got, "Implements #109: #2 publisher text [redacted]\n\nRisk class: sensitive\n\nChanged paths:\n- a/'x'.go\n- b/#3.go\n")},
+		{"summary", strings.Contains(got, "Implements #109: #2 publisher text [redacted]\n\nRisk class: sensitive\n\nChanged paths:\n- a/'x'.go\n- b/#3.go\n- c/'org/team'.go")},
 		{"verify", strings.Contains(got, "- `go test ./...`: passed (local gate)\n- `go vet ./...`: failed (local gate)\nRequired checks: verify, docs")},
 		{"agent notes sanitized", strings.Contains(got, "Notes: #3 alice  &lt;!-- ddf:x --&gt; [redacted]")},
 	}
@@ -127,5 +127,78 @@ func TestSquashMessage(t *testing.T) {
 	}
 	if _, err := publisher.SquashMessage(publisher.ChangeText{TaskRef: "#1"}, r); !errors.Is(err, publisher.ErrInvalidChangeText) {
 		t.Errorf("empty class error = %v", err)
+	}
+}
+
+// leaks returns the first fragment of a value (any window of five bytes, also
+// of the value as Sanitize changes it) that occurs in out.
+func leaks(out string, values []string) string {
+	const n = 5
+	for _, v := range values {
+		for _, form := range []string{v, publisher.Sanitize(v), publisher.SanitizeLine(v)} {
+			for i := 0; i+n <= len(form); i++ {
+				if strings.Contains(out, form[i:i+n]) {
+					return form[i : i+n]
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// TestRenderBody_RedactsBeforeSanitizing uses loaded values that the
+// sanitizer would change or cut, so only redaction before sanitizing hides
+// them.
+func TestRenderBody_RedactsBeforeSanitizing(t *testing.T) {
+	mention := "Pw!" + "@Zq7xP2"
+	comment := "Kv--" + ">Mj4yR8"
+	hidden := "Hn\r\nW\u200bb5Lt9"
+	cut := "CtQ9wXb3VmZ7"
+	line := "LnJ6pYd2HsK4"
+	values := []string{mention, comment, hidden, cut, line}
+	r := publisher.NewRedactor(secrets(values...))
+	several := mention + " " + comment + " " + hidden
+	cases := []struct {
+		name string
+		c    publisher.ChangeText
+	}{
+		{"altered values", publisher.ChangeText{
+			Title:        "t " + several,
+			ChangedPaths: []string{"d/" + several + ".go"},
+			AgentNotes:   "n " + several,
+		}},
+		{"byte cap and line cap cut the value", publisher.ChangeText{
+			Title:        strings.Repeat("t", publisher.MaxLineRunes-6) + line,
+			ChangedPaths: []string{strings.Repeat("p", publisher.MaxLineRunes-8) + line},
+			AgentNotes:   strings.Repeat("a", publisher.MaxSanitizedBytes-6) + cut,
+		}},
+		{"other input fields", publisher.ChangeText{
+			Title:          "t",
+			Verify:         []publisher.VerifyLine{{Command: "go test " + mention, Passed: true}},
+			RequiredChecks: []string{"check " + comment},
+			Authorization:  "owner " + hidden,
+		}},
+	}
+	tmpl := changeTemplate(t)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.c.TaskRef, tc.c.Class = "#109", model.RiskClassSensitive
+			body, err := publisher.RenderBody(tmpl, tc.c, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			msg, err := publisher.SquashMessage(tc.c, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, out := range map[string]string{"body": body, "squash message": msg} {
+				if f := leaks(out, values); f != "" {
+					t.Errorf("%s leaks fragment %q:\n%s", name, f, out)
+				}
+			}
+			if !strings.Contains(body, "[redac") {
+				t.Errorf("body has no marker:\n%s", body)
+			}
+		})
 	}
 }

@@ -27,6 +27,8 @@ func fakeTokens() []struct{ name, token, want string } {
 		{"google-api-key", "AI" + "za" + r("G", 35), "[redacted]"},
 		{"jwt", "ey" + "J" + r("a", 7) + "." + r("b", 10) + "." + r("c", 10), "[redacted]"},
 		{"url-credentials", "https://" + "fakeuser" + ":" + "fakepass" + "@host.example/x", "https://[redacted]@host.example/x"},
+		{"url-credentials", "https://" + "fakeuser" + ":" + "fake@pass" + "@host.example/x", "https://[redacted]@host.example/x"},
+		{"private-key", "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----\n\nlQfake\n-----END " + "PGP PRIVATE KEY BLOCK-----", "[redacted]"},
 	}
 }
 
@@ -71,6 +73,7 @@ func TestRedact_LoadedValues(t *testing.T) {
 	}{
 		{"value inside a longer word", []string{"test-secret-alpha"}, "xxtest-secret-alphayy", "xx[redacted]yy"},
 		{"prefix overlap leaves no fragment", []string{"test-secret-a", "test-secret-abc"}, "k=test-secret-abc;", "k=[redacted];"},
+		{"inner overlap leaves no fragment", []string{"xab", "abc-secret"}, "k=xabc-secret;", "k=x[redacted];"},
 		{"empty secret ignored", []string{""}, "abc", "abc"},
 		{"value inside the marker stays idempotent", []string{"act"}, "act [redacted]", "[redacted] [redacted]"},
 		{"values before patterns", []string{"test-secret-beta"}, "https://u" + ":test-secret-beta@h", "https://[redacted]@h"},

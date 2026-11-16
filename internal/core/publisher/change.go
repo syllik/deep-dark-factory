@@ -58,7 +58,7 @@ func (c ChangeText) summary() string {
 	}
 	paths := make([]string, 0, len(c.ChangedPaths))
 	for _, p := range c.ChangedPaths {
-		paths = append(paths, "- "+strings.ReplaceAll(SanitizeLine(p), "`", "'"))
+		paths = append(paths, "- "+SanitizeLine(strings.ReplaceAll(p, "`", "'")))
 	}
 	slices.Sort(paths)
 	b.WriteString("Changed paths:\n" + strings.Join(paths, "\n"))
@@ -86,18 +86,44 @@ func (c ChangeText) verify() string {
 	return b.String()
 }
 
+// redacted returns a copy of c with every agent- or input-controlled field
+// redacted, so a loaded value is gone before the sanitizer can change it. The
+// marker [redacted] passes Sanitize and SanitizeLine unchanged.
+func (c ChangeText) redacted(r Redactor) ChangeText {
+	c.Title = r.Redact(c.Title)
+	c.AgentNotes = r.Redact(c.AgentNotes)
+	c.Authorization = r.Redact(c.Authorization)
+	c.ChangedPaths = redactAll(r, c.ChangedPaths)
+	c.RequiredChecks = redactAll(r, c.RequiredChecks)
+	verify := make([]VerifyLine, 0, len(c.Verify))
+	for _, v := range c.Verify {
+		verify = append(verify, VerifyLine{Command: r.Redact(v.Command), Passed: v.Passed})
+	}
+	c.Verify = verify
+	return c
+}
+
+func redactAll(r Redactor, in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		out = append(out, r.Redact(s))
+	}
+	return out
+}
+
 // RenderBody renders the change body from the change template
 // (templates/project/.ddf/change-template.md,
 // docs/concepts/lifecycle.md#publishing). HTML comments are removed from the template first; it must then hold
 // {task}, {summary}, {verify} and {agentNotes} and no other placeholder except
 // {authorization}. Substitution is single-pass, so inserted text is never
 // expanded again; {task} is 'Closes <TaskRef>', the only closing keyword DDF
-// writes, and agent text appears only in {agentNotes}. The whole body is
-// redacted last.
+// writes, and agent text appears only in {agentNotes}. Every input field is
+// redacted before it is sanitized, and the whole body is redacted again last.
 func RenderBody(tmpl string, c ChangeText, r Redactor) (string, error) {
 	if err := c.validate(); err != nil {
 		return "", err
 	}
+	c = c.redacted(r)
 	tmpl = regexp.MustCompile(`(?s)<!--.*?-->`).ReplaceAllString(tmpl, "")
 	if strings.Contains(tmpl, "<!--") {
 		return "", fmt.Errorf("%w: unterminated comment", ErrInvalidTemplate)
@@ -135,11 +161,13 @@ func RenderBody(tmpl string, c ChangeText, r Redactor) (string, error) {
 
 // SquashMessage returns the squash message, which is also the revision's
 // commit message: the sanitized title, the DDF summary and 'Closes <TaskRef>',
-// redacted. It holds no agent notes.
+// redacted per field before sanitizing and as a whole last. It holds no agent
+// notes.
 func SquashMessage(c ChangeText, r Redactor) (string, error) {
 	if err := c.validate(); err != nil {
 		return "", err
 	}
+	c = c.redacted(r)
 	msg := SanitizeLine(c.Title) + "\n\n" + c.summary() + "\n\nCloses " + c.TaskRef + "\n"
 	return r.Redact(msg), nil
 }

@@ -83,7 +83,8 @@ func hiddenRune(c rune) bool {
 
 // stripMentions drops the '@' of a mention: an '@' followed by an ASCII letter
 // or digit, at the start or after a rune that cannot precede a mention. An
-// '@' inside an e-mail address or after a backtick stays.
+// '@' inside an e-mail address stays. A backtick gives no exemption: it may
+// close a code span right before the '@' (fail closed).
 func stripMentions(s string) string {
 	var b strings.Builder
 	prev := rune(-1)
@@ -102,7 +103,7 @@ func mentionMayFollow(prev rune) bool {
 	if prev < 0 {
 		return true
 	}
-	return !unicode.IsLetter(prev) && !unicode.IsDigit(prev) && !strings.ContainsRune("_.-/@`", prev)
+	return prev >= utf8.RuneSelf || !isASCIIAlnum(byte(prev)) && !strings.ContainsRune("_.-/@", prev)
 }
 
 func isASCIIAlnum(c byte) bool {

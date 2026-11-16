@@ -14,7 +14,7 @@ import (
 var (
 	closingRef = regexp.MustCompile(`(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*(?:#[0-9]|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]|gh-[0-9]|https?://)`)
 	ciSkip     = regexp.MustCompile(`(?i)\[\s*(?:skip|ci|no|actions)[\s_-]*(?:ci|skip|actions|checks)\s*\]|skip-checks\s*:\s*true|\*\*\*no_ci\*\*\*`)
-	mention    = regexp.MustCompile("(?:^|[^A-Za-z0-9_.\\-/@`])@[A-Za-z0-9]")
+	mention    = regexp.MustCompile(`(?:^|[^A-Za-z0-9_.\-/@])@[A-Za-z0-9]`)
 )
 
 func sanitizeCases() []struct{ name, in, want string } {
@@ -42,7 +42,10 @@ func sanitizeCases() []struct{ name, in, want string } {
 		{"d mention", "@alice hi", "alice hi"},
 		{"d team mention", "(@org/team)", "(org/team)"},
 		{"d e-mail kept", "a@b.example", "a@b.example"},
-		{"d backtick kept", "`@x`", "`@x`"},
+		{"d backtick gives no exemption", "`@x`", "`x`"},
+		{"d after a closed code span", "`x`@alice", "`x`alice"},
+		{"d after a quote", "a/'@org/team'.go", "a/'org/team'.go"},
+		{"d after a non-ASCII letter", "\u00e9@alice", "\u00e9alice"},
 		{"e comment escaped", "<!-- ddf:task-key x -->", "&lt;!-- ddf:task-key x --&gt;"},
 		{"e nested comment marker", "<!-->", "&lt;!--&gt;"},
 		{"nesting keyword in keyword", "Fixes Fixes #1", "#1"},
