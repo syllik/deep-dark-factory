@@ -340,6 +340,17 @@ Source: Issue #43 (owner decisions of 2026-11-10, comment 6752693755; frontier d
 - 2026-11-15 AGENT-DEFAULT: What counts as an empty database? → Missing file, zero-length file, or a database with no tables. Task: #80.
 - 2026-11-15 AGENT-DEFAULT: How are settings applied on every connection? → DSN _pragma parameters plus _txlock=immediate, with SetMaxOpenConns(1), read back after open. Task: #80.
 
+## 2026-11-15 M2 Task 7: scheduler (Issue #78)
+
+- 2026-11-15 AGENT-DEFAULT: Which tasks hold a zone and when does a flagged task release it? → Unflagged tasks in running, publishing, ci, review, fixing or merge hold their zones; a task with any flag (needs-owner, hold, failed) is off the conveyor and holds none. Zones match by exact string equality. Task: #78.
+- 2026-11-15 AGENT-DEFAULT: When is a dependency satisfied? → Only when a task with that key is in the input in state done; an unknown key is unsatisfied (fail closed). Task: #78.
+- 2026-11-15 AGENT-DEFAULT: What does 'then by satisfied dependencies' order mean? → Among band-3 tasks of equal follow-up status and priority, a task with more dependencies (all satisfied) goes first. Task: #78.
+- 2026-11-15 AGENT-DEFAULT: Where do follow-ups sort? → Inside band 3 (ready, unblocked waiting, planning) all follow-ups come after all non-follow-ups, before priority is compared; follow-ups in fixing, merge, ci or review keep their band. Task: #78.
+- 2026-11-15 AGENT-DEFAULT: Are planner runs scheduled? → Yes, a planning task that wants a run is a band-3 candidate ordered like a ready task; it skips zone and dependency checks because those are known only after planning. Task: #78.
+- 2026-11-15 AGENT-DEFAULT: How does the count cap count a run that needs several containers? → Each task states the containers its next run needs (at least 1); admission is strict in order and stops at the first candidate that does not fit, so lower-priority work never overtakes. Task: #78.
+- 2026-11-15 AGENT-DEFAULT: How is the pause set typed in the scheduler? → As a set of reason strings; any non-empty set admits nothing. The reason enum and set/lift rules belong to the lifecycle (Task 6b). Task: #78.
+- 2026-11-15 AGENT-DEFAULT: Which type carries host capacity? → ports.Capacity (CPU millis, memory bytes, disk bytes), carried in the input and not used for admission until #34. Task: #78.
+
 ## 2026-11-16 M2 Task 4: policy classification (Issue #86)
 
 - 2026-11-16 AGENT-DEFAULT: What glob semantics do policy paths use? → doublestar.Match on the full repository-relative slash path. A pattern without a leading **/ is anchored at the repository root. X/** also matches X itself. A Match error is returned as an error, never treated as no match. Task: #86.
