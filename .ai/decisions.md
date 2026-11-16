@@ -371,3 +371,10 @@ Source: Issue #43 (owner decisions of 2026-11-10, comment 6752693755; frontier d
 - 2026-11-16 AGENT-DEFAULT: How are the default glob lists held in Go? → As unexported functions returning new slice literals, exported through Default*Globs() copies. There are no package-level slice variables, per the no-mutable-state rule. Task: #86.
 - 2026-11-16 AGENT-DEFAULT: What does policy.Profile hold? → Autonomy (request), LowMaxLines, Docs, Sensitive, CIEntrypoints, Forbidden and RequiredChecks (nil = key absent, for the Task 5 gate). hardStops categories, zones, planning and reviewers keys are not read by policy and stay out. Task: #86.
 - 2026-11-16 AGENT-DEFAULT: What if the change exceeds the plan's ~600-line PR target? → Keep it as one PR: the target is advisory, and Tasks 5, 11 and 15 need the whole root-package API. Keep test tables compact. Task: #86.
+
+## 2026-11-15 M2 Task 3c: store operations (Issue #77)
+
+- 2026-11-16 AGENT-DEFAULT: Which tables get store operations now? → tasks, events and intents (what recovery and the engine skeleton need); runs, changes, base_merges, reviews, findings, questions, pause_reasons, cooling and flakes are schema-only until their first consumer task adds operations, each decoding enum columns through Parse (spec §4.5 SQL rules). Task: #81.
+- 2026-11-16 AGENT-DEFAULT: Where does the store get time? → From the caller, who reads the clock port; the store takes time values and never reads a clock. Task: #81.
+- 2026-11-16 AGENT-DEFAULT: Does resolving an intent append an event? → No; intents are their own record; only task state changes append events. Task: #81.
+- 2026-11-16 AGENT-DEFAULT: How is an absent optional enum stored? → SQL NULL; "" in the column is a read error. Task: #81.
