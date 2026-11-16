@@ -1,5 +1,5 @@
 package config
 
 import (
-	_ "go.yaml.in/yaml/v3"
+	_ "github.com/bmatcuk/doublestar/v4"
 )

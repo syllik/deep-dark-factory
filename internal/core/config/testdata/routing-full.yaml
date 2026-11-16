@@ -1,0 +1,14 @@
+# Sets every property of schemas/routing.json (placeholder values).
+tiers:
+  deep: [{adapter: example-cli, provider: example-provider, model: example-model, effort: high}]
+  standard: [{adapter: example-cli, provider: example-provider, model: example-model, effort: medium}]
+  routine: [{adapter: example-cli, provider: example-provider, model: example-model, effort: low}]
+  fast: [{adapter: example-cli, provider: example-provider, model: example-model}]
+roles:
+  planner: {prefer: [{adapter: example-cli, provider: example-provider, model: example-model}]}
+  executor: {prefer: [{adapter: example-cli, provider: example-provider, model: example-model}]}
+  r1: {prefer: [{adapter: example-cli, provider: example-provider, model: example-model}]}
+  r2: {prefer: [{adapter: example-cli, provider: example-provider-b, model: example-model}]}
+limits:
+  maxConcurrentContainers: 2
+  maxSubagentsPerRun: 1
