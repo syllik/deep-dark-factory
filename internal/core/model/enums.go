@@ -296,3 +296,154 @@ func ParseResultKind(s string) (ResultKind, error) {
 func (rk *ResultKind) UnmarshalText(b []byte) error {
 	return unmarshalEnum(rk, b, ParseResultKind)
 }
+
+// TaskKind is what a task row stands for (spec §4.5).
+type TaskKind string
+
+// TaskKind values.
+const (
+	TaskKindTask     TaskKind = "task"
+	TaskKindRequest  TaskKind = "request"
+	TaskKindFollowup TaskKind = "followup"
+)
+
+// ParseTaskKind returns the TaskKind spelled s; an unknown or empty value is an error.
+func ParseTaskKind(s string) (TaskKind, error) {
+	return parseEnum("task kind", s, []TaskKind{TaskKindTask, TaskKindRequest, TaskKindFollowup})
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler through ParseTaskKind.
+func (tk *TaskKind) UnmarshalText(b []byte) error {
+	return unmarshalEnum(tk, b, ParseTaskKind)
+}
+
+// Priority is a task's scheduling priority (spec §4.5).
+type Priority string
+
+// Priority values.
+const (
+	PriorityHigh   Priority = "high"
+	PriorityNormal Priority = "normal"
+	PriorityLow    Priority = "low"
+)
+
+// ParsePriority returns the Priority spelled s; an unknown or empty value is an error.
+func ParsePriority(s string) (Priority, error) {
+	return parseEnum("priority", s, []Priority{PriorityHigh, PriorityNormal, PriorityLow})
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler through ParsePriority.
+func (p *Priority) UnmarshalText(b []byte) error {
+	return unmarshalEnum(p, b, ParsePriority)
+}
+
+// RunPurpose is why an agent run was started (spec §4.5).
+type RunPurpose string
+
+// RunPurpose values.
+const (
+	RunPurposePlanning   RunPurpose = "planning"
+	RunPurposeInitial    RunPurpose = "initial"
+	RunPurposeCorrection RunPurpose = "correction"
+	RunPurposeSync       RunPurpose = "sync"
+	RunPurposeCIFix      RunPurpose = "ci-fix"
+	RunPurposeReview     RunPurpose = "review"
+)
+
+// ParseRunPurpose returns the RunPurpose spelled s; an unknown or empty value is an error.
+func ParseRunPurpose(s string) (RunPurpose, error) {
+	return parseEnum("run purpose", s, []RunPurpose{RunPurposePlanning, RunPurposeInitial, RunPurposeCorrection, RunPurposeSync, RunPurposeCIFix, RunPurposeReview})
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler through ParseRunPurpose.
+func (rp *RunPurpose) UnmarshalText(b []byte) error {
+	return unmarshalEnum(rp, b, ParseRunPurpose)
+}
+
+// FailureClass is the failure class of a failed run (spec §4.5, §7.3). Its
+// spellings equal those of ports.AgentFailureClass.
+type FailureClass string
+
+// FailureClass values.
+const (
+	FailureClassCredential  FailureClass = "credential"
+	FailureClassRateLimited FailureClass = "rate-limited"
+	FailureClassRetryable   FailureClass = "retryable"
+	FailureClassFatal       FailureClass = "fatal"
+)
+
+// ParseFailureClass returns the FailureClass spelled s; an unknown or empty value is an error.
+func ParseFailureClass(s string) (FailureClass, error) {
+	return parseEnum("failure class", s, []FailureClass{FailureClassCredential, FailureClassRateLimited, FailureClassRetryable, FailureClassFatal})
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler through ParseFailureClass.
+func (fc *FailureClass) UnmarshalText(b []byte) error {
+	return unmarshalEnum(fc, b, ParseFailureClass)
+}
+
+// ChangeKind is what a change does (spec §4.5).
+type ChangeKind string
+
+// ChangeKind values.
+const (
+	ChangeKindChange ChangeKind = "change"
+	ChangeKindRevert ChangeKind = "revert"
+)
+
+// ParseChangeKind returns the ChangeKind spelled s; an unknown or empty value is an error.
+func ParseChangeKind(s string) (ChangeKind, error) {
+	return parseEnum("change kind", s, []ChangeKind{ChangeKindChange, ChangeKindRevert})
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler through ParseChangeKind.
+func (ck *ChangeKind) UnmarshalText(b []byte) error {
+	return unmarshalEnum(ck, b, ParseChangeKind)
+}
+
+// FindingRoute is where a finding was routed (spec §4.5).
+type FindingRoute string
+
+// FindingRoute values.
+const (
+	FindingRouteFixing   FindingRoute = "fixing"
+	FindingRouteFollowup FindingRoute = "followup"
+	FindingRouteMinors   FindingRoute = "minors"
+)
+
+// ParseFindingRoute returns the FindingRoute spelled s; an unknown or empty value is an error.
+func ParseFindingRoute(s string) (FindingRoute, error) {
+	return parseEnum("finding route", s, []FindingRoute{FindingRouteFixing, FindingRouteFollowup, FindingRouteMinors})
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler through ParseFindingRoute.
+func (fr *FindingRoute) UnmarshalText(b []byte) error {
+	return unmarshalEnum(fr, b, ParseFindingRoute)
+}
+
+// IntentOperation is the forge write an intent records (spec §4.5).
+type IntentOperation string
+
+// IntentOperation values.
+const (
+	IntentOperationCreateTask   IntentOperation = "create-task"
+	IntentOperationPush         IntentOperation = "push"
+	IntentOperationOpenChange   IntentOperation = "open-change"
+	IntentOperationUpdateChange IntentOperation = "update-change"
+	IntentOperationPostReview   IntentOperation = "post-review"
+	IntentOperationUpdateBranch IntentOperation = "update-branch"
+	IntentOperationMerge        IntentOperation = "merge"
+	IntentOperationRevert       IntentOperation = "revert"
+	IntentOperationCloseTask    IntentOperation = "close-task"
+	IntentOperationReopenTask   IntentOperation = "reopen-task"
+)
+
+// ParseIntentOperation returns the IntentOperation spelled s; an unknown or empty value is an error.
+func ParseIntentOperation(s string) (IntentOperation, error) {
+	return parseEnum("intent operation", s, []IntentOperation{IntentOperationCreateTask, IntentOperationPush, IntentOperationOpenChange, IntentOperationUpdateChange, IntentOperationPostReview, IntentOperationUpdateBranch, IntentOperationMerge, IntentOperationRevert, IntentOperationCloseTask, IntentOperationReopenTask})
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler through ParseIntentOperation.
+func (op *IntentOperation) UnmarshalText(b []byte) error {
+	return unmarshalEnum(op, b, ParseIntentOperation)
+}
