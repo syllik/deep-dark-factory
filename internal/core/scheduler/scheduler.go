@@ -10,27 +10,6 @@ import (
 	"github.com/syllik/deep-dark-factory/internal/core/ports"
 )
 
-// Priority is a task's priority from the forge label priority:high|normal|low;
-// the empty value means PriorityNormal.
-type Priority string
-
-// Priority values.
-const (
-	PriorityHigh   Priority = "high"
-	PriorityNormal Priority = "normal"
-	PriorityLow    Priority = "low"
-)
-
-// Kind tells a follow-up task from a normal one; the empty value means
-// KindNormal.
-type Kind string
-
-// Kind values.
-const (
-	KindNormal   Kind = "normal"
-	KindFollowup Kind = "followup"
-)
-
 // Task is one task of the snapshot.
 type Task struct {
 	// Key identifies the task; keys are unique in one Input.
@@ -44,10 +23,11 @@ type Task struct {
 	Zones []string
 	// Dependencies are the keys of the tasks this task depends on.
 	Dependencies []model.TaskKey
-	// Priority orders ready work; empty means PriorityNormal.
-	Priority Priority
-	// Kind marks follow-ups; empty means KindNormal.
-	Kind Kind
+	// Priority orders ready work; empty means model.PriorityNormal.
+	Priority model.Priority
+	// Kind is the task kind; empty means model.TaskKindTask. Only
+	// model.TaskKindFollowup sorts as a follow-up.
+	Kind model.TaskKind
 	// CreatedAt is the task's creation time, used for oldest-first order.
 	CreatedAt time.Time
 	// WantsRun reports whether the task wants a new run now.
@@ -154,13 +134,13 @@ func classify(state model.TaskState) (b band, holds bool) {
 }
 
 // priorityRank orders priorities high, normal, low.
-func priorityRank(p Priority) int {
+func priorityRank(p model.Priority) int {
 	switch p {
-	case PriorityHigh:
+	case model.PriorityHigh:
 		return 0
-	case PriorityNormal:
+	case model.PriorityNormal:
 		return 1
-	case PriorityLow:
+	case model.PriorityLow:
 		return 2
 	}
 	return 1 // empty: normal
@@ -188,15 +168,15 @@ func validate(in Input) error {
 				return fmt.Errorf("scheduler: task %q: %w", t.Key, err)
 			}
 		}
-		switch t.Priority {
-		case "", PriorityHigh, PriorityNormal, PriorityLow:
-		default:
-			return fmt.Errorf("scheduler: task %q: unknown priority %q", t.Key, t.Priority)
+		if t.Priority != "" {
+			if _, err := model.ParsePriority(string(t.Priority)); err != nil {
+				return fmt.Errorf("scheduler: task %q: %w", t.Key, err)
+			}
 		}
-		switch t.Kind {
-		case "", KindNormal, KindFollowup:
-		default:
-			return fmt.Errorf("scheduler: task %q: unknown kind %q", t.Key, t.Kind)
+		if t.Kind != "" {
+			if _, err := model.ParseTaskKind(string(t.Kind)); err != nil {
+				return fmt.Errorf("scheduler: task %q: %w", t.Key, err)
+			}
 		}
 		if t.WantsRun && t.Containers < 1 {
 			return fmt.Errorf("scheduler: task %q: wants a run with %d containers, want at least 1", t.Key, t.Containers)
@@ -255,7 +235,7 @@ func Decide(in Input) (Decision, error) {
 		cands = append(cands, candidate{
 			task:      t,
 			band:      b,
-			followup:  t.Kind == KindFollowup,
+			followup:  t.Kind == model.TaskKindFollowup,
 			priority:  priorityRank(t.Priority),
 			satisfied: satisfiedCount(t, done),
 		})

@@ -39,11 +39,15 @@ func deps(d ...string) func(*scheduler.Task) {
 	}
 }
 
-func prio(p scheduler.Priority) func(*scheduler.Task) {
+func prio(p model.Priority) func(*scheduler.Task) {
 	return func(t *scheduler.Task) { t.Priority = p }
 }
 
-func followup(t *scheduler.Task) { t.Kind = scheduler.KindFollowup }
+func followup(t *scheduler.Task) { t.Kind = model.TaskKindFollowup }
+
+func kind(k model.TaskKind) func(*scheduler.Task) {
+	return func(t *scheduler.Task) { t.Kind = k }
+}
 
 func idle(t *scheduler.Task) { t.WantsRun = false; t.Containers = 0 }
 
@@ -221,7 +225,7 @@ func TestDecide(t *testing.T) {
 		},
 		{
 			name: "bands: fixing/merge, then ci/review, then ready; oldest then key inside bands 1 and 2", in: scheduler.Input{Tasks: []scheduler.Task{
-				task("r", model.TaskStateReady, 0, prio(scheduler.PriorityHigh)),
+				task("r", model.TaskStateReady, 0, prio(model.PriorityHigh)),
 				task("c", model.TaskStateCI, 1),
 				task("v", model.TaskStateReview, 2),
 				task("m", model.TaskStateMerge, 3),
@@ -242,18 +246,26 @@ func TestDecide(t *testing.T) {
 			name: "band 3: priority, then satisfied dependencies, then oldest, then key; follow-ups last", in: scheduler.Input{Tasks: []scheduler.Task{
 				task("d1", model.TaskStateDone, 0, idle),
 				task("d2", model.TaskStateDone, 0, idle),
-				task("fu-high", model.TaskStateReady, 0, followup, prio(scheduler.PriorityHigh)),
-				task("fu-low", model.TaskStateReady, 0, followup, prio(scheduler.PriorityLow)),
-				task("low", model.TaskStateReady, 0, prio(scheduler.PriorityLow)),
+				task("fu-high", model.TaskStateReady, 0, followup, prio(model.PriorityHigh)),
+				task("fu-low", model.TaskStateReady, 0, followup, prio(model.PriorityLow)),
+				task("low", model.TaskStateReady, 0, prio(model.PriorityLow)),
 				task("normal-old", model.TaskStateReady, 1),
-				task("normal-new", model.TaskStateReady, 9, prio(scheduler.PriorityNormal)),
+				task("normal-new", model.TaskStateReady, 9, prio(model.PriorityNormal)),
 				task("normal-2deps", model.TaskStateWaiting, 10, deps("d1", "d2")),
 				task("normal-1dep", model.TaskStatePlanning, 10, deps("d1")),
-				task("high-b", model.TaskStateReady, 5, prio(scheduler.PriorityHigh)),
-				task("high-a", model.TaskStateReady, 5, prio(scheduler.PriorityHigh)),
+				task("high-b", model.TaskStateReady, 5, prio(model.PriorityHigh)),
+				task("high-a", model.TaskStateReady, 5, prio(model.PriorityHigh)),
 			}},
 			admit:   []string{"high-a", "high-b", "normal-2deps", "normal-1dep", "normal-old", "normal-new", "low", "fu-high", "fu-low"},
 			toReady: []string{"normal-2deps"},
+		},
+		{
+			name: "band 3: request and task kinds sort as non-follow-ups, before a follow-up", in: scheduler.Input{Tasks: []scheduler.Task{
+				task("fu", model.TaskStateReady, 0, followup, prio(model.PriorityHigh)),
+				task("req", model.TaskStateReady, 2, kind(model.TaskKindRequest), prio(model.PriorityLow)),
+				task("tsk", model.TaskStateReady, 1, kind(model.TaskKindTask), prio(model.PriorityLow)),
+			}},
+			admit: []string{"tsk", "req", "fu"},
 		},
 		{
 			name: "pause admits nothing but still reports transitions", in: scheduler.Input{
@@ -373,14 +385,14 @@ func mixed() scheduler.Input {
 			task("run", model.TaskStateRunning, 0, idle, zones("busy")),
 			task("fix", model.TaskStateFixing, 3, zones("f")),
 			task("ci", model.TaskStateCI, 2),
-			task("r-high", model.TaskStateReady, 5, prio(scheduler.PriorityHigh), zones("s")),
+			task("r-high", model.TaskStateReady, 5, prio(model.PriorityHigh), zones("s")),
 			task("r-same-1", model.TaskStateReady, 7, zones("s")),
 			task("r-same-2", model.TaskStateReady, 7),
 			task("r-dep", model.TaskStateReady, 7, deps("done")),
 			task("r-busy", model.TaskStateReady, 1, zones("busy")),
 			task("w-clear", model.TaskStateWaiting, 4, deps("done")),
 			task("fu", model.TaskStateReady, 0, followup),
-			task("plan", model.TaskStatePlanning, 8, prio(scheduler.PriorityLow)),
+			task("plan", model.TaskStatePlanning, 8, prio(model.PriorityLow)),
 			task("held", model.TaskStateReady, 0, flag(model.TaskFlagHold)),
 		},
 	}
@@ -463,8 +475,8 @@ func TestDecide_InputErrors(t *testing.T) {
 		{"unknown state", "task state", scheduler.Input{Tasks: []scheduler.Task{task("a", "paused", 0)}}},
 		{"empty state", "task state", scheduler.Input{Tasks: []scheduler.Task{task("a", "", 0)}}},
 		{"unknown flag", "task flag", scheduler.Input{Tasks: []scheduler.Task{task("a", model.TaskStateReady, 0, flag("blocked"))}}},
-		{"unknown priority", "unknown priority", scheduler.Input{Tasks: []scheduler.Task{task("a", model.TaskStateReady, 0, prio("urgent"))}}},
-		{"unknown kind", "unknown kind", scheduler.Input{Tasks: []scheduler.Task{task("a", model.TaskStateReady, 0, func(t *scheduler.Task) { t.Kind = "bugfix" })}}},
+		{"unknown priority", "parse priority", scheduler.Input{Tasks: []scheduler.Task{task("a", model.TaskStateReady, 0, prio("urgent"))}}},
+		{"unknown kind", "parse task kind", scheduler.Input{Tasks: []scheduler.Task{task("a", model.TaskStateReady, 0, func(t *scheduler.Task) { t.Kind = "bugfix" })}}},
 		{"zero containers", "containers", scheduler.Input{Tasks: []scheduler.Task{task("a", model.TaskStateReady, 0, containers(0))}}},
 		{"negative containers", "containers", scheduler.Input{Tasks: []scheduler.Task{task("a", model.TaskStateReady, 0, containers(-1))}}},
 		{"negative cap", "negative cap", scheduler.Input{MaxConcurrentContainers: capOf(-1), Tasks: []scheduler.Task{ok("a")}}},
