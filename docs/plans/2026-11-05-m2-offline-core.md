@@ -258,7 +258,7 @@ Scope per #43 answer 3.
 **Risk class:** `sensitive` (merge code in `internal/adapters/forge/**` row).
 **Depends on:** Tasks 8a, 9 (`sandbox-fake` for checks); not Task 3. Audit P2-11 (the [`forge-local.md`](../adapters/forge-local.md) gaps) resolved before it.
 
-- [ ] **Step 1:** Full forge port per [forge-local.md#contract](../adapters/forge-local.md#contract) on a `file://` bare repository plus its own storage: plain files in a directory of its own, never the DDF store, and no import of `internal/core/store` ([spec §10.1](../specs/2026-11-03-ddf-v1-design.md#101-forge-local)). The file format is defined with this task. Tasks; intake actor = local operator; change = branch with task-key marker; review projections in its own storage.
+- [ ] **Step 1:** Full forge port per [forge-local.md#contract](../adapters/forge-local.md#contract) on a `file://` bare repository plus its own storage: plain files in a directory of its own, never the DDF store, and no import of `internal/core/store` ([spec §10.1](../specs/2026-11-03-ddf-v1-design.md#101-forge-local)). Storage, task files, task-key marker, checks, revert and the ssh credential: [forge-local.md](../adapters/forge-local.md#storage). Tasks; intake actor = local operator; change = branch plus a change record carrying the task-key marker; review projections in its own storage.
 - [ ] **Step 2:** Checks = verify through the sandbox port; merge by compare-and-swap ref update pinned to the head; revert; dry-run for every write.
 - [ ] **Step 3:** Tests: moved integration branch → `behind base`; moved head → merge fails (probe 8).
 - [ ] **Verify:** verify.
