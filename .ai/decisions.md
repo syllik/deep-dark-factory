@@ -384,6 +384,13 @@ Source: Issue #89; Issue #43 decision 7; audit P2-14 on Issue #43; plan `docs/pl
 - 2026-11-16 AGENT-DEFAULT: Does the audit's other half (adapters importing core packages beyond the allowed ones) join this change? → No. The Issue offers only the pure-package import rules, no adapter exists yet, and the allowed core set for adapters is not fixed in a normative list. It stays open on audit P2-14 for a later boundary task. Task: #89.
 - 2026-11-16 AGENT-DEFAULT: Where do the new fixtures go? → Clean: the store import moves out of `forge/a`; new `scheduler/a.go` (`time`), `scheduler/a_test.go` (`os`, `log`, `math/rand`) and `lifecyclex/a.go` (`os`); `store/a.go` also imports `os`. Violations: a new empty `internal/core/store` package, a new adapter `internal/adapters/sandbox/d` importing it, and new `lifecycle`, `policy/gate` and `scheduler` packages that import the forbidden paths. Task: #89.
 
+## 2026-11-15 M2 Task 3c: store operations (Issue #77)
+
+- 2026-11-16 AGENT-DEFAULT: Which tables get store operations now? → tasks, events and intents (what recovery and the engine skeleton need); runs, changes, base_merges, reviews, findings, questions, pause_reasons, cooling and flakes are schema-only until their first consumer task adds operations, each decoding enum columns through Parse (spec §4.5 SQL rules). Task: #81.
+- 2026-11-16 AGENT-DEFAULT: Where does the store get time? → From the caller, who reads the clock port; the store takes time values and never reads a clock. Task: #81.
+- 2026-11-16 AGENT-DEFAULT: Does resolving an intent append an event? → No; intents are their own record; only task state changes append events. Task: #81.
+- 2026-11-16 AGENT-DEFAULT: How is an absent optional enum stored? → SQL NULL; "" in the column is a read error. Task: #81.
+
 ## 2026-11-16 M2 Task 8a-1: workspace git helper (Issue #93)
 
 - 2026-11-16 AGENT-DEFAULT: Does #90 fit one PR under the ~600 changed-line target? → No: DECOMPOSE into 8a-1 (#93: git helper with explicit env and version check, clean clone, fetch, per-run copy) and 8a-2 (#94: patch-id, daemon base merge, conflict detection, workflow-file check), in that order, both sensitive under internal/core/workspace/git/**; #90 closes when 8a-2 merges. Task: #93.

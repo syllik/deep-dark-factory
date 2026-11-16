@@ -22,7 +22,7 @@ CREATE TABLE tasks (
     flag_failed      INTEGER NOT NULL DEFAULT 0,
     risk             TEXT,
     priority         TEXT    NOT NULL DEFAULT 'normal',
-    hit_stop         INTEGER NOT NULL DEFAULT 0,
+    hit_stop         INTEGER NOT NULL DEFAULT 0 CHECK (hit_stop IN (0, 1)),
     created_at       INTEGER NOT NULL,
     updated_at       INTEGER NOT NULL,
     teardown_at      INTEGER,
@@ -116,6 +116,7 @@ CREATE TABLE questions (
     question_id  TEXT    NOT NULL PRIMARY KEY,
     task_key     TEXT    NOT NULL REFERENCES tasks (task_key),
     category     TEXT    NOT NULL,
+    head_sha     TEXT,
     asked_at     INTEGER NOT NULL,
     answered_at  INTEGER,
     answer_actor TEXT,
@@ -173,6 +174,15 @@ END;
 CREATE TRIGGER events_no_delete BEFORE DELETE ON events
 BEGIN
     SELECT RAISE(ABORT, 'events are append-only');
+END;
+
+-- events.seq is assigned by SQLite. NEW.seq is not NULL in a BEFORE INSERT
+-- trigger even when seq is omitted, so the trigger aborts an insert that
+-- names an existing seq (an INSERT OR REPLACE over a journal row).
+CREATE TRIGGER events_seq_auto BEFORE INSERT ON events
+WHEN NEW.seq IN (SELECT seq FROM events)
+BEGIN
+    SELECT RAISE(ABORT, 'events.seq is assigned by SQLite');
 END;
 
 -- tasks.hit_stop is sticky: once set it is never cleared.
