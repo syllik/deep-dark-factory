@@ -137,7 +137,7 @@ Table (key): columns; payload.
 - `base_merges` (`task_key`, `change_id`, `merge_sha`): `base_sha`, `parent_head_sha`, `intent_id`, `created_at`. These are the daemon-created base merges of §6.6 rule 4.
 - `reviews` (`review_id`): `task_key`; `change_id`; `role`; `head_sha`; `round`; `verdict`; `blocking_count`; `findings_digest`; `raise_risk` (nullable); `sig_version`; `key_id`; `signature`; `run_id`; `created_at`. Payload `ddf.review/v1`: hard-stop checklist, summary.
 - `findings` (`review_id`, `finding_id`): `task_key`; `role`; `head_sha`; `severity`; `category`; `security_level` (nullable); `blocking`; `prior_id` (nullable; filled once the reviewer schema carries it, Task 16); `routed` `fixing|followup|minors` (nullable). Payload: evidence, location, fixHint, wontFix reason.
-- `questions` (`question_id`): `task_key`; `category`; `asked_at`; `answered_at`; `answer_actor`. Payload: question text, paths, answer text.
+- `questions` (`question_id`): `task_key`; `category`; `head_sha` (nullable; the head a merge-refusal question was asked for, so the row asks once per head); `asked_at`; `answered_at`; `answer_actor`. Payload: question text, paths with their hard-stop entries (blob ID and mode, or deleted; the answer approves these, §6.4), answer text.
 - `intents` (`intent_id`): `task_key`; `operation` `create-task|push|open-change|update-change|post-review|update-branch|merge|revert|close-task|reopen-task`; `status`; `dry_run`; `created_at`; `resolved_at`. Payload `ddf.intent/v1`: the call's arguments and the evidence reconciliation needs (task-key marker, target ref, expected old SHA, head SHA), then the outcome (forge object ID, new SHA, error class). Index on pending.
 - `events` (`seq`, autoincrement): `task_key` (null only for global events); `type`; `at`. Payload `ddf.event/v1` with the §8.6 audit fields: role, identity and permission set, token expiry (never the token), commits, model, usage.
 - `pause_reasons` (`reason`): `set_at`; payload detail.
@@ -183,7 +183,7 @@ flags (off the conveyor): needs-owner, hold, failed; global: paused (reasons: ow
 
 **Executor** runs in a container on a workspace copy, may use subagents, runs the profile's verify inside the container, and exports a patch (§8.3). Verdicts: `COMPLETE` → `publishing`; `BLOCKED` → `needs-owner`.
 
-**Publisher (trusted code)** applies the patch to a clean clone (§8.3), checks path policy and risk class, runs the local gate in a fresh container, makes one commit and one push per revision (no force-push, rebase or amend), and opens or updates the change. It writes the change body and the squash message itself from a template: agent text is included only in a sanitized section (closing keywords, `[skip ci]`-style directives and mentions stripped), and `Closes <task>` is added by DDF only for the task itself. Local gate failure → back to the Executor as a correction batch. A revision whose applied tree matches a default hard-stop glob, a forbidden path or a symlink is not published: the task goes to `needs-owner` and `hit_stop` is set (§6.4, §6.5).
+**Publisher (trusted code)** applies the patch to a clean clone (§8.3), checks path policy and risk class on the revision's changed paths (§6.2), runs the local gate in a fresh container, makes one commit and one push per revision (no force-push, rebase or amend), and opens or updates the change. It writes the change body and the squash message itself from a template: agent text is included only in a sanitized section (closing keywords, `[skip ci]`-style directives and mentions stripped), and `Closes <task>` is added by DDF only for the task itself. Local gate failure → back to the Executor as a correction batch. A revision whose changed paths hold an unapproved hard-stop entry, a forbidden path (a `.opencode/` or `.claude/` path at any depth included, §8.3) or an added or changed symlink is not published: the task goes to `needs-owner` and `hit_stop` is set (§6.4, §6.5).
 
 **CI** (§6.6 required checks) on the current head. For `forge-local` the daemon runs verify in a fresh container as CI. One automatic rerun per head; pass-on-rerun is recorded as a flake; a test flaking in two changes produces a `needs-owner` quarantine proposal (never an auto-executed task). CI failure → Executor CI-fix attempt.
 
@@ -200,7 +200,8 @@ flags (off the conveyor): needs-owner, hold, failed; global: paused (reasons: ow
 | behind base | sync |
 | checks missing/pending/red | `ci` |
 | review missing/stale/not approved | `review` |
-| hard stop or path policy on the current head (for example a commit DDF did not publish) | `needs-owner`; the change stays at `propose` (§6.4) |
+| hard stop or path policy on the current head (§6.6 condition 6, for example a commit DDF did not publish) | `needs-owner` once per head (a head already asked about takes the `hit_stop` row), `hit_stop` set; the change stays at `propose` (§6.4) |
+| `hit_stop` set (§6.6 condition 2) and no other row applies, including the owner-answered revision and a head already asked about | stay, no new `needs-owner`: the change waits at `propose` for a human to merge or close it (§6.4) |
 | flag or global pause | stay |
 | change converted to draft or closed by a human | `hold`, notify |
 | task closed by a human | leaves the conveyor; open change left for the human |
@@ -255,6 +256,8 @@ Effective level per §3. No level promotes to production.
 5. Any binary file added, changed or deleted makes the change exceed `risk.lowMaxLines`.
 6. A mode-only change counts 0.
 7. Every path rule (docs, sensitive, `ciEntrypoints`, hard-stop globs, forbidden, agent-instruction files) matches both the old and the new path of a rename.
+
+**Changed paths**, the one set every path rule and path check matches (risk class, path policy, hard stops, the Publisher's refusals, the merge gate; examples: [policy.md](../concepts/policy.md#changed-paths)): every path that differs between the merge base of the integration branch and the change, and the tree checked, which is the revision's applied tree for the Publisher and the change head for the merge gate. That is every added, modified, deleted or type-changed path, a mode-only change included, and both the old and the new path of a rename (`git diff --raw -M --no-abbrev`, which also gives each path's mode and blob ID). Path rules never match the unchanged rest of the tree; a deletion matches like an addition. Why: matching the whole tree would flag any repository that merely contains a Dockerfile, and a deleted hard-stop or forbidden path leaves no trace in the tree that remains.
 
 **Lockfiles**, a fixed product list, not a profile key in V1:
 <!-- sync:lockfiles -->
@@ -322,10 +325,10 @@ Default hard-stop globs (deploy, infrastructure, container files, IaC):
 - `ansible/**`
 <!-- /sync:hard-stop-globs -->
 
-Flow:
-- A change whose applied tree matches a default hard-stop glob is not published. The task goes to `needs-owner` (category and paths) before publishing, and `hit_stop` is set.
-- After the owner's answer, the Publisher publishes that revision and the task continues at `propose` (human merge); an owner who does not want it closes the task.
-- A hard stop found on a published head maps to the refusal row of §5.2 Merge.
+Flow. The **hard-stop entries** of a tree are its changed paths (§6.2) that match a default hard-stop glob, each with its state in that tree (blob ID and mode, or deleted):
+- A revision with a hard-stop entry the owner has not approved is not published. The task goes to `needs-owner` (category and paths) before publishing, and `hit_stop` is set.
+- The owner's answer approves exactly the entries the question listed (stored with the question, §4.5). The Publisher then publishes that revision (the owner-answered revision) and the task continues at `propose` (human merge); an owner who does not want it closes the task. A later revision or head whose hard-stop entries are all approved asks nothing new; any other entry (a new path, other content or mode, a deletion) is a new hard stop.
+- On a published head, an unapproved hard-stop entry, a forbidden path or an added or changed symlink in its changed paths fails §6.6 condition 6 and maps to the §5.2 Merge refusal row for a hard stop or path policy on the current head, which asks the owner at most once per head (the question records the head SHA, §4.5). A head already asked about maps to the `hit_stop` row (condition 2), which asks nothing new; the owner-answered revision does not fail condition 6, since its entries are approved. Why: the owner already answered for that exact content, so asking on every gate evaluation would loop, while approval keyed to content still catches any later change.
 - Projects add hard-stop categories (`hardStops`), which the reviewers' hard-stop checklist covers. V1 has no project hard-stop glob key; a project uses `forbidden` or `risk.sensitive` for paths.
 
 A change that hit a hard stop or path policy is never merged autonomously, even after an owner answer: it continues at `propose`.
@@ -342,11 +345,13 @@ Forbidden by default (agents may not change them; owner-only):
 - symbolic links (any added or changed symlink is refused in V1).
 <!-- /sync:forbidden -->
 
+Agent configuration directories count at any depth: a changed path under `.opencode/` or `.claude/` anywhere in the tree (`**/.opencode/**`, `**/.claude/**`) is a forbidden path (§8.3).
+
 The project's `ciEntrypoints` (scripts and manifests CI relies on, e.g. `package.json`, guard scripts) are not forbidden but force the `sensitive` class, so dependency changes stay possible while CI weakening gets R2 at `deep`.
 
 Evaluated from the integration branch copy of the profile, never from the change itself. Projects add more.
 
-A change touching a forbidden path or symlink is refused by the Publisher and never published automatically (probe 3). The task goes to `needs-owner` and `hit_stop` is set. After the owner's answer it returns to `running` with the answer in the Executor brief; a revision that still touches a forbidden path is refused again. Forbidden paths change only in a human-merged change.
+A revision whose changed paths (§6.2) touch a forbidden path or hold an added or changed symlink is refused by the Publisher and never published automatically (probe 3). The task goes to `needs-owner` and `hit_stop` is set. After the owner's answer it returns to `running` with the answer in the Executor brief; a revision that still touches a forbidden path is refused again. Forbidden paths change only in a human-merged change.
 
 ### 6.6 Merge gate
 
@@ -357,7 +362,7 @@ A change touching a forbidden path or symlink is refused by the Publisher and ne
 3. change open, not draft;
 4. every reviewer required by the risk class has a valid signed review with verdict APPROVE and zero blocking findings, for the current head **or** for an ancestor head where every later commit is a base merge the daemon itself created (its SHA recorded in the store from the daemon's own intent; author metadata does not count) and `git patch-id --verbatim` of the change is unchanged; a base merge made by anyone else (e.g. a human "Update branch") never qualifies;
 5. every check in the profile's `checks.required` is present and successful on the current head (with no list: at least one check run, all successful);
-6. path policy passes;
+6. path policy passes and no unapproved hard-stop entry is in the head's changed paths (§6.2, §6.4);
 7. change not behind base and mergeable;
 8. any forge read error → refusal (fail-closed).
 
@@ -510,9 +515,10 @@ The token broker mints an installation token per operation, narrowed to one repo
 
 - Daemon clones live in the `data` mount (§8.1; macOS colima profile default: `~ddf/work/<forge>/<owner>/<repo>`), used only by trusted code, with hooks disabled (`core.hooksPath` to an empty directory, no fsmonitor, no filter drivers).
 - Each run gets a fresh copy (its own `.git`, no remotes, no credentials). The copy is per run: never shared with the host's working files or another run, reachable only by that run's container, and destroyed with the run cell; it is never a bind mount of a control-plane or host path. The Sandbox port takes it in as content and returns files out (§4.2); how the adapter moves it (an archive stream, or a per-run volume the control plane fills) is the adapter's matter. Read-only for the Planner and reviewers, writable for the Executor; the local gate and `forge-local` CI get the applied tree as content the same way.
-- After the Executor finishes, the adapter's trusted wrapper (not the agent) runs `git add -A && git diff --cached --binary <base>` in the container and writes `/out/change.patch`. The Publisher applies it to the daemon's clean clone with hooks and config neutralised, refuses symlinks, paths outside the repository and any path under `.git/`, and evaluates path policy on the applied tree.
+- After the Executor finishes, the adapter's trusted wrapper (not the agent) runs `git add -A && git diff --cached --binary <base>` in the container and writes `/out/change.patch`. The Publisher applies it to the daemon's clean clone with hooks and config neutralised, refuses symlinks, paths outside the repository and any path under `.git/`, and evaluates path policy on the changed paths of the applied tree (§6.2).
 - **The host never executes repository content.** Verify, the local gate and `forge-local` CI always run in fresh containers. The local gate runs on the applied tree **before** the commit is pushed, so a failing gate produces no forge write. The host never runs an agent CLI against a repository copy, not even `opencode models` or `opencode debug`: opencode loads project plugins on every invocation.
-- The Publisher refuses a patch that adds a `.opencode/` or `.claude/` path (already forbidden by §6.5) or any `node_modules/` path unless the project profile allows it: failed run, with the reason in the journal.
+- The Publisher refuses a patch that adds any `node_modules/` path unless the project profile allows it: failed run, with the reason in the journal.
+- A changed path under `.opencode/` or `.claude/`, at any depth, is a forbidden path (§6.5): the revision is not published, the task goes to `needs-owner` and `hit_stop` is set. Why one outcome: the forbidden-path flow is the stricter one; the owner sees every attempt and sticky `hit_stop` keeps the change at `propose`, while a discarded run would be retried without the owner.
 
 ### 8.4 Containers
 
@@ -612,7 +618,7 @@ templates/project/  .ddf/project.yaml, issue forms (task, request, bug), AGENTS.
 
 ## 12. DDF's own profile
 
-DDF is a pilot of itself (D1). Its profile marks these paths `sensitive` (R1 + R2, R2 at `deep`): the gate `internal/core/policy/gate/**`, the review signatures `internal/core/policy/signature/**`, the merge code in `internal/adapters/forge/**`, patch apply `internal/core/workspace/patch/**` and the Publisher `internal/core/publisher/**` (sanitizer, path checks). Also kept, for paths with no M2 code, for their milestone: `internal/core/store/migrations/**` (M5), `cmd/ddfd/**` (the daemon's entry point; owner decision 2026-11-12), the token broker (M4), `internal/adapters/agent/**` (M3) and `internal/adapters/sandbox/docker/**` (M3); and `prompts/**`, `schemas/**` and every forbidden path. Other code takes the default size rules (§6.2). One deep security review of the integrated core at M2 exit (#43 decision 10). Its `ciEntrypoints` are `scripts/docs-check.mjs` and, when they exist, `go.mod`, `go.sum` and `test/boundaries/**`. Until DDF has its own project file, the working copy of this profile is in [manual mode](../orchestrator/manual-mode.md#ddfs-own-profile-until-ddfprojectyaml-exists). Combined with §4.4 (the daemon runs only from a maintainer-promoted ref), an autonomously merged change to DDF cannot alter the running factory until a human promotes it.
+DDF is a pilot of itself (D1). Its profile marks these paths `sensitive` (R1 + R2, R2 at `deep`): the gate `internal/core/policy/gate/**`, the review signatures `internal/core/policy/signature/**`, the merge code in `internal/adapters/forge/**`, patch apply `internal/core/workspace/patch/**`, the git helper and clean clone `internal/core/workspace/git/**` (explicit git env; hooks, fsmonitor and filter drivers neutralised; §8.3; kept by path because patch apply and the daemon base merge rely on it) and the Publisher `internal/core/publisher/**` (sanitizer, path checks). Also kept, for paths with no M2 code, for their milestone: `internal/core/store/migrations/**` (M5), `cmd/ddfd/**` (the daemon's entry point; owner decision 2026-11-12), the token broker (M4), `internal/adapters/agent/**` (M3) and `internal/adapters/sandbox/docker/**` (M3); and `prompts/**`, `schemas/**` and every forbidden path. Other code takes the default size rules (§6.2). One deep security review of the integrated core at M2 exit (#43 decision 10). Its `ciEntrypoints` are `scripts/docs-check.mjs` and, when they exist, `go.mod`, `go.sum` and `test/boundaries/**`. Until DDF has its own project file, the working copy of this profile is in [manual mode](../orchestrator/manual-mode.md#ddfs-own-profile-until-ddfprojectyaml-exists). Combined with §4.4 (the daemon runs only from a maintainer-promoted ref), an autonomously merged change to DDF cannot alter the running factory until a human promotes it.
 
 ## 13. Migration
 
@@ -766,3 +772,11 @@ Answers, evidence and probe definitions: `docs/research/2026-11-m0-facts.md`; de
 - 2026-11-14 Issue #74: §10.1 — `forge-local` keeps its own storage outside the DDF store; no adapter imports the store (#43 decision 7, audit P1-1)
 - 2026-11-14 Issue #74: §12 — `sensitive` paths narrowed to the gate, signatures, forge merge code, patch apply and Publisher, plus paths kept for their milestone; one deep security review at M2 exit (#43 decision 10, audit P1-1; see docs/orchestrator/manual-mode.md#ddfs-own-profile-until-ddfprojectyaml-exists)
 - 2026-11-14 Issue #74: §14 — M2 walking skeleton and exit security review; M3 re-adoption, drain on upgrade, internal events beside the tick; M5 store migrations, backup and restore, review-signing key rotation
+- 2026-11-15 Issue #76: §4.5 — `questions` gains nullable `head_sha`; payload names the hard-stop entries the answer approves (PR #75 review r1-2)
+- 2026-11-15 Issue #76: §5.2 — Publisher checks path policy and risk class on the revision's changed paths; unapproved hard-stop entry, agent directories at any depth, added or changed symlink; hard-stop refusal row asks once per head, new `hit_stop` row (PR #75 review r2-2, r1-2)
+- 2026-11-15 Issue #76: §6.2 — changed paths: the one set every path rule and path check matches, taken from the merge base; a deletion matches like an addition (PR #75 review r2-2)
+- 2026-11-15 Issue #76: §6.4 — hard-stop entries (path plus blob ID and mode, or deleted); the owner's answer approves the listed entries; published-head refusal asks once per head (PR #75 review r2-2, r1-2)
+- 2026-11-15 Issue #76: §6.5 — agent configuration directories are forbidden at any depth; refusal applies to the revision's changed paths (PR #75 review r1-1)
+- 2026-11-15 Issue #76: §6.6 — condition 6 covers unapproved hard-stop entries in the head's changed paths (PR #75 review r1-2)
+- 2026-11-15 Issue #76: §8.3 — path policy on the changed paths of the applied tree; agent directories follow the forbidden-path flow, `node_modules/` additions keep their outcome (PR #75 review r2-2, r1-1)
+- 2026-11-15 Issue #76: §12 — git helper and clean clone `internal/core/workspace/git/**` added to the `sensitive` paths (PR #75 review r2-1)
