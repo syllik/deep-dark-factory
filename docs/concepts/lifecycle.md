@@ -86,8 +86,9 @@ The [Publisher](roles.md#publisher) (trusted code):
 The Publisher writes the change body and squash message from a template; agent text appears only in a sanitized section (closing keywords, `[skip ci]`-style directives and mentions stripped); `Closes <task>` is added by DDF only for the task itself. Local gate failure → back to the Executor as a correction batch.
 
 - **Redaction before publication.** Before every forge write and every notification send, all agent-originated text (review projection comments, change body, commit message, patch content, Telegram messages) is redacted by secret patterns and by the exact values of the secrets loaded into that run's container. A patch containing a loaded secret value is refused: hard stop `secrets` ([policy.md](policy.md#hard-stops)), failed run.
-- **Hard stops and forbidden paths.** A change whose applied tree matches a default hard-stop glob is not published: `needs-owner` before publishing, `hit_stop` set; after the owner's answer the Publisher publishes that revision and the task continues at `propose`. A change touching a forbidden path or symlink is never published automatically: `needs-owner`, `hit_stop` set, and after the answer the task returns to `running`. `hit_stop` is sticky ([policy.md](policy.md#hard-stops), [policy.md](policy.md#forbidden-paths)).
-- The Publisher refuses a patch that adds a `.opencode/` or `.claude/` path (already a [forbidden path](policy.md#forbidden-paths)) or any `node_modules/` path unless the project profile allows it: failed run, with the reason in the journal.
+- **Hard stops and forbidden paths.** The Publisher checks the revision's [changed paths](policy.md#changed-paths); a deletion counts. A revision with an unapproved [hard-stop entry](policy.md#hard-stops) is not published: `needs-owner` before publishing, `hit_stop` set; the owner's answer approves exactly the listed entries, the Publisher publishes that revision and the task continues at `propose`; a later revision whose hard-stop entries are all approved is published without a new question. A revision touching a forbidden path (a `.opencode/` or `.claude/` path at any depth included) or holding an added or changed symlink is never published automatically: `needs-owner`, `hit_stop` set, and after the answer the task returns to `running`. `hit_stop` is sticky ([policy.md](policy.md#hard-stops), [policy.md](policy.md#forbidden-paths)).
+- The Publisher refuses a patch that adds any `node_modules/` path unless the project profile allows it: failed run, with the reason in the journal.
+- A changed path under `.opencode/` or `.claude/`, at any depth, is a [forbidden path](policy.md#forbidden-paths): the revision is not published, the task goes to `needs-owner` and `hit_stop` is set. Why one outcome: the forbidden-path flow is the stricter one; the owner sees every attempt and sticky `hit_stop` keeps the change at `propose`, while a discarded run would be retried without the owner.
 
 Rationale: [spec §8.3](../specs/2026-11-03-ddf-v1-design.md#83-workspaces-and-publication), [spec §8.4](../specs/2026-11-03-ddf-v1-design.md#84-containers).
 
@@ -146,7 +147,8 @@ Gate refusals map to transitions ([spec §5.2](../specs/2026-11-03-ddf-v1-design
 | behind base | sync |
 | checks missing/pending/red | `ci` |
 | review missing/stale/not approved | `review` |
-| hard stop or path policy on the current head (for example a commit DDF did not publish) | `needs-owner`; the change stays at `propose` (§6.4) |
+| hard stop or path policy on the current head (§6.6 condition 6, for example a commit DDF did not publish) | `needs-owner` once per head (a head already asked about takes the `hit_stop` row), `hit_stop` set; the change stays at `propose` (§6.4) |
+| `hit_stop` set (§6.6 condition 2) and no other row applies, including the owner-answered revision and a head already asked about | stay, no new `needs-owner`: the change waits at `propose` for a human to merge or close it (§6.4) |
 | flag or global pause | stay |
 | change converted to draft or closed by a human | `hold`, notify |
 | task closed by a human | leaves the conveyor; open change left for the human |
