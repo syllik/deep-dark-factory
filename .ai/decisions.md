@@ -322,3 +322,12 @@ Source: Issue #43 (owner decisions of 2026-11-10, comment 6752693755; frontier d
 - 2026-11-15 AGENT-DEFAULT: Which outcome for a patch that adds a .opencode/ or .claude/ path (r1-1)? → The forbidden-path flow (needs-owner before publishing, hit_stop set, back to running after the answer), stated the same way everywhere; the stricter outcome, since the owner sees every attempt. node_modules/ keeps its existing outcome. Task: #76.
 - 2026-11-15 AGENT-DEFAULT: Does that rule cover nested .opencode/ and .claude/ directories? → Yes, at any depth (**/.opencode/**, **/.claude/**), as the old §8.3 wording was not limited to the root. It is stated outside the sync:forbidden block, which stays unchanged. Task: #76.
 - 2026-11-15 AGENT-DEFAULT: Which r2-1 option keeps the hardened clean clone and git invocation sensitive? → A named package internal/core/workspace/git/** in the spec §12 and manual-mode sensitive rows (deterministic by path); every workspace git call goes through it; plan Task 8a becomes sensitive; Task 8b's probe-4 tests also call the exact clone and base-merge functions. Task: #76.
+
+## 2026-11-15 M2 Task 3a: model record fields (Issue #79)
+
+- 2026-11-15 AGENT-DEFAULT: How do enums reject unknown values from JSON or store decoding? (supersedes the #67 line 'How do enums reject unknown values from JSON or store decoding?') → UnmarshalText rejects unknown values only for JSON string values; JSON null or a missing field leaves the zero value and is caught by the record's Validate(); store columns are decoded by explicit Parse<Type> (#73). Task: #79.
+- 2026-11-15 AGENT-DEFAULT: How is a zero-value enum in a decoded record rejected? → A Validate() error method per record type; required enums must parse, optional ones are zero or parse. Task: #79.
+- 2026-11-15 AGENT-DEFAULT: Where does the run failure class type live, given model cannot import ports? → model.FailureClass with the same four spellings as ports.AgentFailureClass, pinned by a test. Task: #79.
+- 2026-11-15 AGENT-DEFAULT: Are question category, event type and pause reason enums now? → No: question category and event type stay strings (the spec defines no closed set); a PauseReason type comes with its first consumer (lifecycle/scheduler). Task: #79.
+- 2026-11-15 AGENT-DEFAULT: How are task flags represented? → Unchanged Flags []TaskFlag; Validate rejects duplicates; the store maps them to the three flag columns. Task: #79.
+- 2026-11-15 AGENT-DEFAULT: How are agent defaults carried? → Task.AgentDefaults []Decision. Task: #79.
