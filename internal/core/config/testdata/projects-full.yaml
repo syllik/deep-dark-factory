@@ -1,0 +1,19 @@
+# Sets every property of schemas/projects.json (placeholder values).
+projects:
+  - id: example-app
+    forge: github
+    repository: example-org/example-app
+    maxAutonomy: merge-integration
+    allowedActors: [example-maintainer]
+  - id: example-local
+    forge: local
+    remote: file:///srv/git/example.git
+    maxAutonomy: propose
+    allowedActors: [example-maintainer]
+notifications:
+  telegram:
+    userId: "100000001"
+    chatId: "-100000002"
+limits:
+  minFreeDiskGb: 10
+  maxRunsPerTask: 12

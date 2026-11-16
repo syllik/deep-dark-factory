@@ -1,0 +1,26 @@
+# Sets every property of schemas/project.json (placeholder values).
+version: ddf.project/v1
+integrationBranch: main
+autonomy: merge-integration
+verify: [make verify]
+checks:
+  required: [verify]
+image: .ddf/Dockerfile
+registries: [registry.example.org]
+risk:
+  lowMaxLines: 150
+  docs: ["docs/**"]
+  sensitive: ["src/auth/**"]
+ciEntrypoints: ["Makefile"]
+forbidden: ["ops/**"]
+hardStops: [secrets]
+zones:
+  db: ["migrations/**"]
+planning:
+  maxAutoChildren: 2
+change:
+  branch: "{type}/issue-{n}-{slug}"
+  merge: squash
+  template: .ddf/change-template.md
+reviewers:
+  r2DifferentProvider: true

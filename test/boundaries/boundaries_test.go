@@ -34,6 +34,8 @@ var thirdPartyAllowlist = []struct{ pkg, module string }{
 	{"internal/core/store", "modernc.org/sqlite"},
 	{"internal/core/model", "github.com/santhosh-tekuri/jsonschema/v6"},
 	{"internal/core/policy", "github.com/bmatcuk/doublestar/v4"},
+	{"internal/core/config", "go.yaml.in/yaml/v3"},
+	{"internal/core/config", "github.com/santhosh-tekuri/jsonschema/v6"},
 }
 
 // purePackages and pureForbidden are the core-pure rule: a non-test file of a
@@ -151,7 +153,8 @@ func TestBoundaries_Fixtures(t *testing.T) {
 		{"test-tree", "internal/daemon", v + "test/fakes"},
 		{"core-thirdparty", "internal/core/ids", "github.com/google/uuid"},
 		{"core-thirdparty", "internal/core/model", "github.com/bmatcuk/doublestar/v4"},
-		{"core-thirdparty", "internal/core/config", "go.yaml.in/yaml/v3"},
+		{"core-thirdparty", "internal/core/config", "github.com/bmatcuk/doublestar/v4"},
+		{"core-thirdparty", "internal/core/model", "go.yaml.in/yaml/v3"},
 		{"core-build", "", "internal/core/tagged/tagnet.go"},
 		{"core-build", "", "internal/core/withcgo/cgo.go"},
 		{"core-build", "", "internal/core/tagonly/only.go"},
