@@ -331,3 +331,11 @@ Source: Issue #43 (owner decisions of 2026-11-10, comment 6752693755; frontier d
 - 2026-11-15 AGENT-DEFAULT: Are question category, event type and pause reason enums now? → No: question category and event type stay strings (the spec defines no closed set); a PauseReason type comes with its first consumer (lifecycle/scheduler). Task: #79.
 - 2026-11-15 AGENT-DEFAULT: How are task flags represented? → Unchanged Flags []TaskFlag; Validate rejects duplicates; the store maps them to the three flag columns. Task: #79.
 - 2026-11-15 AGENT-DEFAULT: How are agent defaults carried? → Task.AgentDefaults []Decision. Task: #79.
+
+## 2026-11-15 M2 Task 3b: store open and schema (Issue #80, part of #77)
+
+- 2026-11-15 AGENT-DEFAULT: Where does the schema version number live? → A Go const in the store package, written into schema_version on create; schema.sql holds DDL only. Task: #80.
+- 2026-11-15 AGENT-DEFAULT: Are enum columns constrained in SQL? → No CHECK constraints; every enum column is decoded through its model Parse function (#73), so the enum lists have one source. Task: #80.
+- 2026-11-15 AGENT-DEFAULT: How is 'the file is never changed' guaranteed on a version mismatch? → The version is read through a read-only connection before any pragma or write; the read-write handle opens only after the version is equal or the database is empty. Task: #80.
+- 2026-11-15 AGENT-DEFAULT: What counts as an empty database? → Missing file, zero-length file, or a database with no tables. Task: #80.
+- 2026-11-15 AGENT-DEFAULT: How are settings applied on every connection? → DSN _pragma parameters plus _txlock=immediate, with SetMaxOpenConns(1), read back after open. Task: #80.
