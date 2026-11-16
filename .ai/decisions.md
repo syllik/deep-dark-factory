@@ -425,6 +425,15 @@ Source: Issue #97; #43 answer 6; plan Task 15.
 - 2026-11-17 AGENT-DEFAULT: How do tests reach the example and template YAML files? → _test.go files read schemas/examples/*.yaml and templates/project/.ddf/project.yaml by relative path (../../../), the way the policy sync test reads docs. Fixtures of their own go in internal/core/config/testdata with placeholder values only. Task: #97.
 - 2026-11-17 AGENT-DEFAULT: What if the change exceeds the plan's ~600-line PR target? → Keep it as one PR. The target is advisory, the loader, its typed structs and the allowlist entry belong together, and #86 set the precedent. Keep test tables compact. Task: #97.
 
+## 2026-11-17 M2 Task 9: fakes (Issue #98)
+
+- 2026-11-17 AGENT-DEFAULT: What state survives a sandbox-fake instance restart? → A Host value holds every resource, scripted outcome and counter; each Sandbox instance is created on a Host with an instance name, so a second instance on the same Host lists, kills and destroys the first instance's resources, as recovery does after a daemon restart. Task: #98.
+- 2026-11-17 AGENT-DEFAULT: Which resources does one sandbox-fake cell create, and what does Kill do? → CreateCell creates one container and one volume labelled with the task key and run ID; Kill stops the container (it stays listed, frees its capacity, refuses further Run) and DestroyByTaskKey removes every resource of the key. Task: #98.
+- 2026-11-17 AGENT-DEFAULT: How are sandbox-fake run outcomes scripted? → A FIFO queue per task key of steps (outcome, output files, or an error); an empty queue gives exit code 0 and no files; GetFiles returns only the requested names the cell has, omitting missing ones without an error, so the caller decides what a missing result.json means. Task: #98.
+- 2026-11-17 AGENT-DEFAULT: How does the fake agent treat credentials? → Like the spec §7.3 contract: a nil credential source, a read error or an empty credential returns class credential before any script step is used; test/fakes provides a static credential source. Task: #98.
+- 2026-11-17 AGENT-DEFAULT: How does the fake agent build an executor patch from edits? → Whole-file hunks in git diff format (new, modified, deleted text files, mode 100644), with the no-newline marker; binary content or an invalid path is a fatal failure; tests check the patch with git apply, and Task 8b's apply stays the authority. Task: #98.
+- 2026-11-17 AGENT-DEFAULT: Does test/fakes/ports.go add fakes beyond notify, secrets, clock and lock? → Only a sequential ID source (ports.IDSource sits next to Clock in ports/clock.go); no forge fake (forge-local is Task 10). Task: #98.
+
 ## 2026-11-17 M2 Task 8a-2: base merge and patch-id (Issue #94)
 
 - 2026-11-17 AGENT-DEFAULT: What does 'records its SHA' mean at the workspace layer? → SyncWithBase returns SyncMerged{BaseMerge{MergeSHA, BaseSHA, ParentHeadSHA}}, the base_merges columns of spec §4.5; it writes only objects, no store row, intent or ref, and pushes nothing. The daemon writes the push intent and the base_merges row; the merge commit is deterministic, so it knows the SHA before the forge write. Task: #94.
