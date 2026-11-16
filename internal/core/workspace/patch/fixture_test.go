@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/syllik/deep-dark-factory/internal/core/workspace/git"
+	"github.com/syllik/deep-dark-factory/internal/core/workspace/patch"
 )
 
 // gitPath is the host git; tests fail, never skip, without it.
@@ -134,4 +135,31 @@ func cleanClone(t *testing.T, r *git.Runner, src string) string {
 		t.Fatalf("CleanClone: %v", err)
 	}
 	return dir
+}
+
+// exportPatch runs the ExportArgs steps through r in the copy cp, which the
+// test wrote, and returns the patch.
+func exportPatch(t *testing.T, r *git.Runner, cp, base string) []byte {
+	t.Helper()
+	args, err := patch.ExportArgs(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []byte
+	for _, a := range args {
+		if out, err = r.Run(t.Context(), cp, nil, a...); err != nil {
+			t.Fatalf("git %v: %v", a, err)
+		}
+	}
+	return out
+}
+
+// diffOf returns the binary diff from..to in repo, untrimmed.
+func diffOf(t *testing.T, r *git.Runner, repo, from, to string) []byte {
+	t.Helper()
+	out, err := r.Run(t.Context(), repo, nil, "diff", "--binary", "--full-index", "--no-renames", "--no-ext-diff", from, to)
+	if err != nil {
+		t.Fatalf("diff %s..%s: %v", from, to, err)
+	}
+	return out
 }
