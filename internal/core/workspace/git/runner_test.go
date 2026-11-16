@@ -124,9 +124,48 @@ func TestRun_BoundsStderr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRunner: %v", err)
 	}
-	_, err = r.Run(t.Context(), t.TempDir(), nil, "-c", "a=b", "status")
+	_, err = r.Run(t.Context(), t.TempDir(), nil, "-c", "user.name=x", "status")
 	var ce *git.CommandError
 	if !errors.As(err, &ce) || ce.ExitCode != 3 || len(ce.Stderr) != 2048 || ce.Error() != "git status: exit code 3" {
 		t.Fatalf("Run = %v (%+v)", err, ce)
+	}
+}
+
+func TestRun_GlobalOptions(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "started")
+	p := filepath.Join(t.TempDir(), "git")
+	writeFile(t, p, "#!/bin/sh\ncase \"$*\" in *' version') echo 'git version 2.56.0';; *) touch '"+marker+"';; esac\n", 0o755)
+	r, err := git.NewRunner(t.Context(), p, filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	cases := []struct {
+		args    string
+		refused bool
+	}{
+		{"-C /tmp status", true},
+		{"--exec-path=/tmp status", true},
+		{"--git-dir=/tmp status", true},
+		{"--work-tree=/tmp status", true},
+		{"--config-env=core.hooksPath=X status", true},
+		{"--namespace=x status", true},
+		{"-c core.hooksPath=/tmp status", true},
+		{"-c protocol.allow=always status", true},
+		{"-c core.fsmonitor=/tmp status", true},
+		{"-c user.name status", true},
+		{"-c", true},
+		{"-c user.name=x --git-dir=/tmp status", true},
+		{"-c user.name=x -c user.email=y commit-tree x", false},
+		{"-c core.logAllRefUpdates=false fetch x", false},
+		{"-c USER.NAME=x status", false},
+		{"status --git-dir=/tmp", false},
+	}
+	for _, c := range cases {
+		_, err := r.Run(t.Context(), t.TempDir(), nil, strings.Fields(c.args)...)
+		_, statErr := os.Stat(marker)
+		if errors.Is(err, git.ErrGlobalOption) != c.refused || (err == nil) == c.refused || (statErr == nil) == c.refused {
+			t.Errorf("Run(%s) = %v, git started: %v; want refused %v", c.args, err, statErr == nil, c.refused)
+		}
+		_ = os.Remove(marker)
 	}
 }

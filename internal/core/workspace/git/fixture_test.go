@@ -96,3 +96,43 @@ func noMarkers(t *testing.T, markers string) {
 		t.Errorf("marker %s exists: repository content ran", e.Name())
 	}
 }
+
+// deleted as a commitOn content removes the file.
+const deleted = "\x00deleted"
+
+// commitOn commits files (name to content, or deleted) on top of parent in
+// repo, keeps it and returns its SHA.
+func commitOn(t *testing.T, r *git.Runner, repo, parent string, files map[string]string) string {
+	t.Helper()
+	gitOut(t, r, repo, nil, "checkout", "-q", "--detach", parent)
+	for name, content := range files {
+		p := filepath.Join(repo, name)
+		if content == deleted {
+			if err := os.Remove(p); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		writeFile(t, p, content, 0o644)
+	}
+	gitOut(t, r, repo, nil, "add", "-A", "--", ".")
+	gitOut(t, r, repo, nil, "commit", "-q", "--allow-empty", "-m", "commit")
+	return keep(t, r, repo, gitOut(t, r, repo, nil, "rev-parse", "HEAD"))
+}
+
+// keep points the branch c/<sha> at sha so a clean clone gets it.
+func keep(t *testing.T, r *git.Runner, repo, sha string) string {
+	t.Helper()
+	gitOut(t, r, repo, nil, "branch", "-f", "c/"+sha, sha)
+	return sha
+}
+
+// cleanClone makes a clean clone of src in a fresh dir.
+func cleanClone(t *testing.T, r *git.Runner, src string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "clean.git")
+	if err := r.CleanClone(t.Context(), src, dir); err != nil {
+		t.Fatalf("CleanClone: %v", err)
+	}
+	return dir
+}

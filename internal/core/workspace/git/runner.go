@@ -70,11 +70,34 @@ func NewRunner(ctx context.Context, gitPath, stateDir string) (*Runner, error) {
 	return r, nil
 }
 
+// ErrGlobalOption is a leading git option Run refuses: anything before the
+// subcommand other than a -c pair whose key is an allowedConfigKey.
+var ErrGlobalOption = errors.New("refused git global option")
+
 // Run runs git with args in dir (absolute) and returns its stdout. A nil
-// stdin is empty. A non-zero exit is a *CommandError; a cancelled context
-// gives an error wrapping ctx.Err().
+// stdin is empty. Leading global options other than allowed -c pairs are
+// ErrGlobalOption, git not started. A non-zero exit is a *CommandError; a
+// cancelled context gives an error wrapping ctx.Err().
 func (r *Runner) Run(ctx context.Context, dir string, stdin []byte, args ...string) ([]byte, error) {
+	out, err := r.run(ctx, dir, stdin, nil, args)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// run is Run with extra "KEY=value" environment entries, each keyed by an
+// identityKey. On a *CommandError it also returns git's stdout.
+func (r *Runner) run(ctx context.Context, dir string, stdin []byte, extraEnv, args []string) ([]byte, error) {
 	sub := subcommand(args)
+	if err := checkGlobalOptions(args); err != nil {
+		return nil, fmt.Errorf("git %s: %w", sub, err)
+	}
+	for _, kv := range extraEnv {
+		if k, _, ok := strings.Cut(kv, "="); !ok || !identityKey(k) {
+			return nil, fmt.Errorf("git %s: environment entry %q is not an identity key=value", sub, k)
+		}
+	}
 	if !filepath.IsAbs(dir) {
 		return nil, fmt.Errorf("git %s: dir %q is not absolute", sub, dir)
 	}
@@ -86,7 +109,7 @@ func (r *Runner) Run(ctx context.Context, dir string, stdin []byte, args ...stri
 	}
 	cmd := exec.CommandContext(ctx, r.gitPath, append(r.globalOptions(), args...)...)
 	cmd.Dir = dir
-	cmd.Env = r.env(dir)
+	cmd.Env = append(r.env(dir), extraEnv...)
 	cmd.Stdin = bytes.NewReader(stdin)
 	var stdout bytes.Buffer
 	stderr := &headWriter{max: stderrLimit}
@@ -97,12 +120,49 @@ func (r *Runner) Run(ctx context.Context, dir string, stdin []byte, args ...stri
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return nil, &CommandError{Args: slices.Clone(args), ExitCode: exitErr.ExitCode(), Stderr: string(stderr.buf)}
+		return stdout.Bytes(), &CommandError{Args: slices.Clone(args), ExitCode: exitErr.ExitCode(), Stderr: string(stderr.buf)}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("git %s: %w", sub, err)
 	}
 	return stdout.Bytes(), nil
+}
+
+// checkGlobalOptions accepts, before the first non-option argument, only
+// "-c key=value" pairs whose key is an allowedConfigKey.
+func checkGlobalOptions(args []string) error {
+	for i := 0; i < len(args) && strings.HasPrefix(args[i], "-"); i += 2 {
+		if args[i] != "-c" || i+1 == len(args) {
+			return fmt.Errorf("%q: %w", args[i], ErrGlobalOption)
+		}
+		key, _, ok := strings.Cut(args[i+1], "=")
+		if !ok || !allowedConfigKey(key) {
+			return fmt.Errorf("-c %q: %w", args[i+1], ErrGlobalOption)
+		}
+	}
+	return nil
+}
+
+// allowedConfigKey reports whether a caller may set key with a leading -c,
+// compared case-insensitively as git does for keys without a subsection.
+// Every other global option could redirect git or re-enable a hook, driver
+// or transport the fixed options disable (spec §8.3).
+func allowedConfigKey(key string) bool {
+	switch strings.ToLower(key) {
+	case "user.name", "user.email", "core.logallrefupdates":
+		return true
+	}
+	return false
+}
+
+// identityKey reports whether run accepts key in extraEnv.
+func identityKey(key string) bool {
+	switch key {
+	case "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
+		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE":
+		return true
+	}
+	return false
 }
 
 // env is the whole child environment; nothing is inherited from the daemon.
