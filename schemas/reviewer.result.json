@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ddf.reviewer.result/v1",
   "title": "DDF Reviewer result (R1 correctness, R2 security/data)",
-  "description": "Written by a reviewer to /out/result.json. Blocking findings (spec section 6.3): severity P0 or P1, securityLevel High or Medium, or category hard-stop. APPROVE is valid only with zero blocking findings and every hard-stop checklist item clear. REQUEST_CHANGES requires at least one blocking finding. A checklist item with status hit requires a finding with category hard-stop. A security finding must carry securityLevel. A checklist item that could not be assessed is unassessed (never clear) and requires a blocking finding (category correctness or acceptance, severity P0 or P1) stating what could not be assessed.",
+  "description": "Written by a reviewer to /out/result.json. Blocking findings (spec section 6.3): severity P0 or P1, securityLevel High or Medium, or category hard-stop. APPROVE is valid only with zero blocking findings and every hard-stop checklist item clear. REQUEST_CHANGES requires at least one blocking finding. A checklist item with status hit requires a finding with category hard-stop. A security finding must carry securityLevel. A checklist item that could not be assessed is unassessed (never clear) and requires a blocking finding (category correctness or acceptance, severity P0 or P1) stating what could not be assessed. A finding that still holds from the prior review of the same role carries that prior finding's id in priorId. Finding ids and priorIds are unique within a result; these and the prior-review checks are made by the core, not by this schema.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "role", "verdict", "findings"],
@@ -104,7 +104,12 @@
         "securityLevel": { "enum": ["High", "Medium", "Low"] },
         "evidence": { "type": "string", "minLength": 1 },
         "location": { "type": "string", "minLength": 1 },
-        "fixHint": { "type": "string", "minLength": 1 }
+        "fixHint": { "type": "string", "minLength": 1 },
+        "priorId": {
+          "description": "For a finding that still holds: the id of the finding it continues from the prior review of the same role.",
+          "type": "string",
+          "minLength": 1
+        }
       },
       "if": { "properties": { "category": { "const": "security" } } },
       "then": { "required": ["securityLevel"] }

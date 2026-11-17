@@ -110,7 +110,7 @@ Never `docs`; they are classed by the code rows. A fixed product list, not a pro
 
 ## Findings
 
-Shape: `{id, severity: P0..P3, category: correctness|acceptance|security|data|hard-stop|docs, securityLevel?, evidence, location?, fixHint?}`.
+Shape: `{id, priorId?, severity: P0..P3, category: correctness|acceptance|security|data|hard-stop|docs, securityLevel?, evidence, location?, fixHint?}`. A finding keeps its identity across review rounds through `priorId`, compared by ID only ([lifecycle.md](lifecycle.md#fixing)).
 
 Blocking: P0, P1, security High/Medium, category `hard-stop`.
 

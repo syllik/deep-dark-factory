@@ -2,6 +2,7 @@ package model
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -84,8 +85,11 @@ func NewResultValidator() (*ResultValidator, error) {
 	return v, nil
 }
 
-// Validate checks that data is exactly one JSON value valid for kind. A parse
-// or validation failure wraps ErrInvalidResult; an unknown kind is an error.
+// Validate checks that data is exactly one JSON value valid for kind. For a
+// reviewer result it also rejects a duplicate finding id and a duplicate
+// non-empty finding priorId; checks against the prior review are made
+// elsewhere. A parse or validation failure wraps ErrInvalidResult; an unknown
+// kind is an error.
 func (v *ResultValidator) Validate(kind ResultKind, data []byte) error {
 	sch, ok := v.schemas[kind]
 	if !ok {
@@ -97,6 +101,41 @@ func (v *ResultValidator) Validate(kind ResultKind, data []byte) error {
 	}
 	if err := sch.Validate(doc); err != nil {
 		return fmt.Errorf("validate %s result: %w: %w", kind, ErrInvalidResult, err)
+	}
+	if kind == ResultKindReviewer {
+		if err := checkFindingIDs(data); err != nil {
+			return fmt.Errorf("validate %s result: %w: %w", kind, ErrInvalidResult, err)
+		}
+	}
+	return nil
+}
+
+// checkFindingIDs reports a duplicate finding id or a duplicate non-empty
+// priorId in a schema-valid reviewer result.
+func checkFindingIDs(data []byte) error {
+	var res struct {
+		Findings []struct {
+			ID      string `json:"id"`
+			PriorID string `json:"priorId"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal(data, &res); err != nil {
+		return fmt.Errorf("decode findings: %w", err)
+	}
+	ids := make(map[string]bool, len(res.Findings))
+	priors := make(map[string]bool, len(res.Findings))
+	for i, f := range res.Findings {
+		if ids[f.ID] {
+			return fmt.Errorf("findings[%d]: duplicate id %q", i, f.ID)
+		}
+		ids[f.ID] = true
+		if f.PriorID == "" {
+			continue
+		}
+		if priors[f.PriorID] {
+			return fmt.Errorf("findings[%d]: duplicate priorId %q", i, f.PriorID)
+		}
+		priors[f.PriorID] = true
 	}
 	return nil
 }

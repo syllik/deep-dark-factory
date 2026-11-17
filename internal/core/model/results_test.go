@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -48,6 +49,9 @@ func TestValidate_AcceptsExamples(t *testing.T) {
 
 func TestValidate_RejectsInvalidResults(t *testing.T) {
 	const validPlanner = `{"schema":"ddf.planner.result/v1","verdict":"READY","spec":"s","acceptance":["a"],"riskProposal":"low"}`
+	const validReviewer = `{"schema":"ddf.reviewer.result/v1","role":"r1","verdict":"APPROVE","findings":[` +
+		`{"id":"r1-1","priorId":"r1-3","severity":"P3","category":"docs","evidence":"e"},` +
+		`{"id":"r1-2","priorId":"r1-4","severity":"P2","category":"correctness","evidence":"e"}]}`
 	const validExecutor = `{"schema":"ddf.executor.result/v1","verdict":"COMPLETE","summary":"s","verify":{"commands":["go test ./..."],"passed":true}}`
 	v := newValidator(t)
 	for _, tt := range []struct {
@@ -61,6 +65,9 @@ func TestValidate_RejectsInvalidResults(t *testing.T) {
 		{"trailing data", model.ResultKindExecutor, validExecutor + ` {}`},
 		{"planner result as executor", model.ResultKindExecutor, validPlanner},
 		{"not JSON", model.ResultKindPlanner, `{`},
+		{"reviewer finding with empty priorId", model.ResultKindReviewer, `{"schema":"ddf.reviewer.result/v1","role":"r1","verdict":"APPROVE","findings":[{"id":"r1-1","priorId":"","severity":"P3","category":"docs","evidence":"e"}]}`},
+		{"reviewer duplicate finding id", model.ResultKindReviewer, strings.Replace(validReviewer, `"id":"r1-2"`, `"id":"r1-1"`, 1)},
+		{"reviewer duplicate priorId", model.ResultKindReviewer, strings.Replace(validReviewer, `"priorId":"r1-4"`, `"priorId":"r1-3"`, 1)},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := v.Validate(tt.kind, []byte(tt.data)); !errors.Is(err, model.ErrInvalidResult) {
@@ -69,11 +76,47 @@ func TestValidate_RejectsInvalidResults(t *testing.T) {
 		})
 	}
 	// Controls: the bases of the cases above are valid.
+	if err := v.Validate(model.ResultKindReviewer, []byte(validReviewer)); err != nil {
+		t.Errorf("valid reviewer: %v", err)
+	}
 	if err := v.Validate(model.ResultKindPlanner, []byte(validPlanner)); err != nil {
 		t.Errorf("valid planner: %v", err)
 	}
 	if err := v.Validate(model.ResultKindExecutor, []byte(validExecutor)); err != nil {
 		t.Errorf("valid executor: %v", err)
+	}
+}
+
+// TestReviewerFindingSchema_MatchesModel fails when the reviewer schema has a
+// finding property that model.Finding does not carry.
+func TestReviewerFindingSchema_MatchesModel(t *testing.T) {
+	raw, err := fs.ReadFile(schemas.FS(), "reviewer.result.json")
+	if err != nil {
+		t.Fatalf("read schema: %v", err)
+	}
+	var doc struct {
+		Defs struct {
+			Finding struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			} `json:"finding"`
+		} `json:"$defs"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse schema: %v", err)
+	}
+	if len(doc.Defs.Finding.Properties) == 0 {
+		t.Fatal("schema has no $defs.finding.properties")
+	}
+	tags := map[string]bool{}
+	ft := reflect.TypeFor[model.Finding]()
+	for i := range ft.NumField() {
+		name, _, _ := strings.Cut(ft.Field(i).Tag.Get("json"), ",")
+		tags[name] = true
+	}
+	for prop := range doc.Defs.Finding.Properties {
+		if !tags[prop] {
+			t.Errorf("schema finding property %q has no model.Finding field", prop)
+		}
 	}
 }
 
