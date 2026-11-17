@@ -5,6 +5,7 @@
   "findings": [
     {
       "id": "r1-1",
+      "priorId": "r1-3",
       "severity": "P1",
       "category": "acceptance",
       "evidence": "Acceptance criterion 2 requires every term to link to docs/concepts; the entry for 'zone' has no link.",

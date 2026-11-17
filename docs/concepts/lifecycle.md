@@ -113,7 +113,8 @@ Rationale: [spec §8.3](../specs/2026-11-03-ddf-v1-design.md#83-workspaces-and-p
 
 - One correction batch = one Executor run addressing all blocking findings, then CI, then a full re-review of the new head with prior findings.
 - The Executor may answer a finding "won't fix + reason".
-- A finding is identified across rounds by `{role, category, location, normalized problem}`; the same finding confirmed blocking twice → `needs-owner`.
+- Finding identity: a reviewer's prior review is the latest valid review of its role on an earlier head of the same change; the re-reviewer gets its findings, ids included, and the `wontFix` list as untrusted data (none on a first review or for R2 added later). A finding that still holds carries `priorId`, the prior finding's `id` copied exactly (severity, category and location judged anew); a fixed one is not reported; a new one has no `priorId`. The core compares IDs only, never content.
+- Within one result, finding ids and `priorId`s are unique, and every `priorId` names a finding of that prior review; otherwise the result is invalid (one retry, then `needs-owner`, see [Bounds](#bounds)). A blocking finding whose `priorId` names a finding blocking in the prior review → `needs-owner`; no transitive chains.
 
 ### sync with base
 

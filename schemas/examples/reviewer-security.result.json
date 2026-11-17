@@ -5,12 +5,20 @@
   "findings": [
     {
       "id": "r2-1",
+      "priorId": "r2-3",
       "severity": "P3",
       "category": "security",
       "securityLevel": "Low",
       "evidence": "The new error message echoes the request path; no secret material is included.",
       "location": "src/server/errors.ts:27",
       "fixHint": "Consider a generic message."
+    },
+    {
+      "id": "r2-2",
+      "severity": "P3",
+      "category": "data",
+      "evidence": "The new log line includes the task key; no personal data is logged.",
+      "location": "src/server/log.ts:12"
     }
   ],
   "hardStopChecklist": [

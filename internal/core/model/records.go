@@ -130,12 +130,15 @@ type Finding struct {
 	Category      FindingCategory `json:"category"`
 	SecurityLevel SecurityLevel   `json:"securityLevel,omitempty"`
 	Blocking      bool            `json:"blocking"`
-	PriorID       string          `json:"priorId,omitempty"`
-	Routed        FindingRoute    `json:"routed,omitempty"`
-	Evidence      string          `json:"evidence"`
-	Location      string          `json:"location,omitempty"`
-	FixHint       string          `json:"fixHint,omitempty"`
-	WontFixReason string          `json:"wontFixReason,omitempty"`
+	// PriorID is optional: for a finding that still holds, the ID of the
+	// finding it continues from the prior review of the same role. Identity
+	// across rounds is by this ID only (spec §5.2 Fixing).
+	PriorID       string       `json:"priorId,omitempty"`
+	Routed        FindingRoute `json:"routed,omitempty"`
+	Evidence      string       `json:"evidence"`
+	Location      string       `json:"location,omitempty"`
+	FixHint       string       `json:"fixHint,omitempty"`
+	WontFixReason string       `json:"wontFixReason,omitempty"`
 }
 
 // Question is a question to the owner, such as a Planner ASK, and its
