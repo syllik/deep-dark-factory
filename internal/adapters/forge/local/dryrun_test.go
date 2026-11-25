@@ -16,53 +16,88 @@ const (
 	secretLabel   = "dry-label-0b8e"
 )
 
+// dryRunFixture is what dryRunEnv set up: task 1 with its source, a new
+// key, an open change with its head, and a pushed but unpublished branch.
+type dryRunFixture struct {
+	src       model.TaskSource
+	key       model.TaskKey
+	change    ports.ChangeInfo
+	newBranch string
+	newHead   string
+}
+
 // dryRunCall runs one write with mode and reports whether its result is
 // the zero value.
 type dryRunCall struct {
 	name string
-	call func(f *local.Forge, src model.TaskSource, key model.TaskKey, mode ports.WriteMode) (zero bool, err error)
+	call func(f *local.Forge, fx dryRunFixture, mode ports.WriteMode) (zero bool, err error)
 }
 
 func dryRunCalls() []dryRunCall {
 	return []dryRunCall{
-		{"Ingest", func(f *local.Forge, _ model.TaskSource, _ model.TaskKey, mode ports.WriteMode) (bool, error) {
+		{"Ingest", func(f *local.Forge, _ dryRunFixture, mode ports.WriteMode) (bool, error) {
 			rej, err := f.Ingest(ctx, mode)
 			return rej == nil, err
 		}},
-		{"CreateTask", func(f *local.Forge, _ model.TaskSource, key model.TaskKey, mode ports.WriteMode) (bool, error) {
-			src, err := f.CreateTask(ctx, mode, ports.NewTask{Key: key, Title: secretTitle, Body: secretBody, Labels: []string{secretLabel}})
+		{"CreateTask", func(f *local.Forge, fx dryRunFixture, mode ports.WriteMode) (bool, error) {
+			src, err := f.CreateTask(ctx, mode, ports.NewTask{Key: fx.key, Title: secretTitle, Body: secretBody, Labels: []string{secretLabel}})
 			return src == (model.TaskSource{}), err
 		}},
-		{"CloseTask", func(f *local.Forge, src model.TaskSource, _ model.TaskKey, mode ports.WriteMode) (bool, error) {
-			return true, f.CloseTask(ctx, mode, src, secretComment)
+		{"CloseTask", func(f *local.Forge, fx dryRunFixture, mode ports.WriteMode) (bool, error) {
+			return true, f.CloseTask(ctx, mode, fx.src, secretComment)
 		}},
-		{"ReopenTask", func(f *local.Forge, src model.TaskSource, _ model.TaskKey, mode ports.WriteMode) (bool, error) {
-			return true, f.ReopenTask(ctx, mode, src, secretComment)
+		{"ReopenTask", func(f *local.Forge, fx dryRunFixture, mode ports.WriteMode) (bool, error) {
+			return true, f.ReopenTask(ctx, mode, fx.src, secretComment)
 		}},
-		{"SetProjectionLabels", func(f *local.Forge, src model.TaskSource, _ model.TaskKey, mode ports.WriteMode) (bool, error) {
-			return true, f.SetProjectionLabels(ctx, mode, src, []string{secretLabel})
+		{"SetProjectionLabels", func(f *local.Forge, fx dryRunFixture, mode ports.WriteMode) (bool, error) {
+			return true, f.SetProjectionLabels(ctx, mode, fx.src, []string{secretLabel})
+		}},
+		{"PublishChange", func(f *local.Forge, fx dryRunFixture, mode ports.WriteMode) (bool, error) {
+			info, err := f.PublishChange(ctx, mode, ports.PublishRequest{
+				Key: fx.key, Branch: fx.newBranch, BaseBranch: integrationBranch, HeadSHA: fx.newHead,
+				Title: secretTitle, Body: secretBody,
+			})
+			return info == (ports.ChangeInfo{}), err
+		}},
+		{"UpdateChangeBody", func(f *local.Forge, fx dryRunFixture, mode ports.WriteMode) (bool, error) {
+			return true, f.UpdateChangeBody(ctx, mode, fx.change.ID, secretBody)
+		}},
+		{"PostReview", func(f *local.Forge, fx dryRunFixture, mode ports.WriteMode) (bool, error) {
+			return true, f.PostReview(ctx, mode, ports.ReviewPost{
+				ChangeID: fx.change.ID, HeadSHA: fx.change.HeadSHA,
+				Reviewer: ports.Identity{ID: "rev-a", Name: "Reviewer A"},
+				Verdict:  model.ReviewVerdictApprove, Body: secretComment,
+			})
+		}},
+		{"RerunChecks", func(f *local.Forge, fx dryRunFixture, mode ports.WriteMode) (bool, error) {
+			return true, f.RerunChecks(ctx, mode, fx.change.HeadSHA)
 		}},
 	}
 }
 
-// dryRunEnv opens a project holding task 1 and an un-ingested inbox file
-// with the secret title and body.
-func dryRunEnv(t *testing.T) (*env, *local.Forge, model.TaskSource) {
+// dryRunEnv opens a project holding task 1, an un-ingested inbox file
+// with the secret title and body, an open change on feat/a and a pushed,
+// unpublished branch feat/new.
+func dryRunEnv(t *testing.T) (*env, *local.Forge, dryRunFixture) {
 	t.Helper()
 	e := newEnv(t)
 	f := e.open(t)
-	src := createTask(t, f, testKey(t, "existing"), "Existing")
+	fx := dryRunFixture{src: createTask(t, f, testKey(t, "existing"), "Existing"), key: testKey(t, "new")}
+	head := e.commitOn(t, "feat/a", "a.txt", "a\n")
+	fx.change = publish(t, f, publishReq(testKey(t, "existing"), "feat/a", head))
+	fx.newBranch = "feat/new"
+	fx.newHead = e.commitOn(t, fx.newBranch, "new.txt", "new\n")
 	e.drop(t, "dry.task.md", taskText(secretTitle, secretBody))
 	e.logs.Reset()
-	return e, f, src
+	return e, f, fx
 }
 
 func TestDryRun_WritesNothing(t *testing.T) {
 	for _, c := range dryRunCalls() {
 		t.Run(c.name, func(t *testing.T) {
-			e, f, src := dryRunEnv(t)
-			before := snapshot(t, e.root())
-			zero, err := c.call(f, src, testKey(t, "new"), ports.WriteModeDryRun)
+			e, f, fx := dryRunEnv(t)
+			before, refs := snapshot(t, e.root()), e.remoteRefs(t)
+			zero, err := c.call(f, fx, ports.WriteModeDryRun)
 			if err != nil {
 				t.Fatalf("dry run: %v", err)
 			}
@@ -70,6 +105,9 @@ func TestDryRun_WritesNothing(t *testing.T) {
 				t.Error("dry run returned a non-zero result")
 			}
 			sameSnapshot(t, before, snapshot(t, e.root()))
+			if got := e.remoteRefs(t); got != refs {
+				t.Errorf("remote refs changed: before %q, after %q", refs, got)
+			}
 			logs := e.logs.String()
 			if !strings.Contains(logs, c.name) {
 				t.Errorf("log %q lacks the method name", logs)
@@ -87,12 +125,15 @@ func TestDryRun_InvalidModeWritesNothing(t *testing.T) {
 	for _, mode := range []ports.WriteMode{"", "bogus"} {
 		for _, c := range dryRunCalls() {
 			t.Run(c.name+"/"+string(mode), func(t *testing.T) {
-				e, f, src := dryRunEnv(t)
-				before := snapshot(t, e.root())
-				if _, err := c.call(f, src, testKey(t, "new"), mode); err == nil {
+				e, f, fx := dryRunEnv(t)
+				before, refs := snapshot(t, e.root()), e.remoteRefs(t)
+				if _, err := c.call(f, fx, mode); err == nil {
 					t.Fatal("invalid write mode accepted")
 				}
 				sameSnapshot(t, before, snapshot(t, e.root()))
+				if got := e.remoteRefs(t); got != refs {
+					t.Errorf("remote refs changed: before %q, after %q", refs, got)
+				}
 			})
 		}
 	}
