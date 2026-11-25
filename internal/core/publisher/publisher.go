@@ -61,6 +61,22 @@ type Input struct {
 
 var branchChars = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
+// validBranchName refuses a branch name outside [A-Za-z0-9._/-], with
+// '..', a leading '-', an empty component (leading, trailing or double
+// '/'), a component starting with '.' or ending in '.lock'.
+func validBranchName(b string) error {
+	ok := branchChars.MatchString(b) && !strings.Contains(b, "..") && !strings.HasPrefix(b, "-")
+	for c := range strings.SplitSeq(b, "/") {
+		if c == "" || strings.HasPrefix(c, ".") || strings.HasSuffix(c, ".lock") {
+			ok = false
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid branch name %q", b)
+	}
+	return nil
+}
+
 func (p *Publisher) validate() error {
 	if p.Git == nil || p.Sandbox == nil || p.Clock == nil || p.IDs == nil {
 		return errors.New("nil git runner, sandbox, clock or id source")
@@ -79,10 +95,12 @@ func (in Input) validate() error {
 		return errors.New("empty run id")
 	}
 	for _, b := range []string{in.Branch, in.BaseBranch} {
-		if !branchChars.MatchString(b) || strings.Contains(b, "..") || strings.HasPrefix(b, "-") ||
-			strings.HasPrefix(b, "/") || strings.HasSuffix(b, "/") || strings.HasSuffix(b, ".lock") {
-			return fmt.Errorf("invalid branch name %q", b)
+		if err := validBranchName(b); err != nil {
+			return err
 		}
+	}
+	if in.Branch == in.BaseBranch {
+		return fmt.Errorf("branch %q is the base branch", in.Branch)
 	}
 	if !isFullSHA(in.Base) || !isFullSHA(in.ChangedFrom) {
 		return fmt.Errorf("base %q or changed-from %q: %w", in.Base, in.ChangedFrom, git.ErrInvalidSHA)
@@ -103,7 +121,10 @@ func (in Input) validate() error {
 // in.Base (objects only) and runs the local gate on it. Precedence: apply
 // refusal (Failed) > secrets > path policy > unapproved hard stop
 // (NeedsOwner) > gate (GateFailed); no cell is created and no commit is
-// written for Failed or NeedsOwner. Every error returns a nil Outcome.
+// written for Failed or NeedsOwner. Every agent-controlled path in a
+// Failed or NeedsOwner is redacted; Ready.ChangedPaths stay raw because a
+// Ready exists only after the path-name secret scan passed. Every error
+// returns a nil Outcome.
 func (p *Publisher) Prepare(ctx context.Context, in Input) (Outcome, error) {
 	if err := p.validate(); err != nil {
 		return nil, fmt.Errorf("prepare: %w", err)
@@ -124,7 +145,7 @@ func (p *Publisher) Prepare(ctx context.Context, in Input) (Outcome, error) {
 		if err != nil {
 			return nil, fmt.Errorf("prepare: %w", err)
 		}
-		return Failed{Reason: reason, Paths: o.Paths}, nil
+		return Failed{Reason: reason, Paths: redactAll(red, o.Paths)}, nil
 	case patch.Applied:
 		applied = o
 	default:
@@ -142,26 +163,30 @@ func (p *Publisher) Prepare(ctx context.Context, in Input) (Outcome, error) {
 		return nil, fmt.Errorf("prepare: %w", err)
 	}
 	if len(pr.Forbidden) > 0 || len(pr.Symlinks) > 0 {
-		paths := slices.Compact(slices.Sorted(slices.Values(slices.Concat(pr.Forbidden, pr.Symlinks))))
+		forbidden, symlinks := redactAll(red, pr.Forbidden), redactAll(red, pr.Symlinks)
+		paths := slices.Compact(slices.Sorted(slices.Values(slices.Concat(forbidden, symlinks))))
 		q := fmt.Sprintf("Hard stop (forbidden path): the revision changes forbidden paths [%s] and symlinks [%s]. Nothing was published. Authorize these exact paths, or answer no.",
-			quoteAll(pr.Forbidden), quoteAll(pr.Symlinks))
-		return NeedsOwner{Stop: StopPathPolicy, Category: "forbidden path", Forbidden: pr.Forbidden, Symlinks: pr.Symlinks,
+			quoteAll(red, forbidden), quoteAll(red, symlinks))
+		return NeedsOwner{Stop: StopPathPolicy, Category: "forbidden path", Forbidden: forbidden, Symlinks: symlinks,
 			Paths: paths, HitStop: true, Question: red.Redact(q)}, nil
 	}
 	if len(pr.Unapproved) > 0 {
 		entries := make([]string, 0, len(pr.Unapproved))
 		paths := make([]string, 0, len(pr.Unapproved))
+		stops := make([]policy.HardStopEntry, 0, len(pr.Unapproved))
 		for _, e := range pr.Unapproved {
+			e.Path = red.Redact(e.Path)
+			stops = append(stops, e)
 			paths = append(paths, e.Path)
 			if e.Deleted {
-				entries = append(entries, fmt.Sprintf("%q (deleted)", e.Path))
+				entries = append(entries, quotePath(red, e.Path)+" (deleted)")
 			} else {
-				entries = append(entries, fmt.Sprintf("%q (mode %s, blob %s)", e.Path, e.Mode, e.BlobID))
+				entries = append(entries, fmt.Sprintf("%s (mode %s, blob %s)", quotePath(red, e.Path), e.Mode, e.BlobID))
 			}
 		}
 		q := fmt.Sprintf("Hard stop (deploy and infrastructure): the revision changes %s. Nothing was published. Approve these exact entries, or answer no.",
 			strings.Join(entries, ", "))
-		return NeedsOwner{Stop: StopHardStop, Category: "deploy and infrastructure", HardStops: pr.Unapproved,
+		return NeedsOwner{Stop: StopHardStop, Category: "deploy and infrastructure", HardStops: stops,
 			Paths: paths, HitStop: true, Question: red.Redact(q)}, nil
 	}
 	cl, err := policy.Classify(in.Profile, applied.ChangedPaths)

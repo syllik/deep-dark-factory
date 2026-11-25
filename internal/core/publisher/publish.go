@@ -57,8 +57,13 @@ func validateReady(r Ready) error {
 	if !filepath.IsAbs(p.Clone) {
 		return fmt.Errorf("clone %q is not absolute", p.Clone)
 	}
-	if p.Branch == "" {
-		return errors.New("empty branch")
+	for _, b := range []string{p.Branch, r.Change.BaseBranch} {
+		if err := validBranchName(b); err != nil {
+			return err
+		}
+	}
+	if p.Branch == r.Change.BaseBranch {
+		return fmt.Errorf("push branch %q is the base branch", p.Branch)
 	}
 	if p.Branch != r.Change.Branch {
 		return fmt.Errorf("push branch %q differs from change branch %q", p.Branch, r.Change.Branch)

@@ -28,6 +28,9 @@ const loadedValue = "test-secret-loaded-7f3a"
 // matches a secret pattern.
 func ghToken() string { return "gh" + "p_" + strings.Repeat("Z9", 18) }
 
+// tokenName is a base file whose name holds a pattern-shaped token.
+func tokenName() string { return "cfg/" + "gh" + "p_" + strings.Repeat("W5", 18) + ".txt" }
+
 // pubEnv is a clean clone whose base commit holds baseFiles, with a fake
 // sandbox host and a Publisher on them.
 type pubEnv struct {
@@ -47,6 +50,7 @@ func newPubEnv(t *testing.T) *pubEnv {
 		"src/a.go":      "package a\n",
 		"deploy/x.yaml": "x: 1\n",
 		"cfg/token.txt": "token = " + ghToken() + "\nline = 1\n",
+		tokenName():     "named\n",
 	}
 	base := commitOn(t, r, src, first, files)
 	files["README"] = "base\n"
@@ -212,6 +216,8 @@ func TestPrepare_ApplyRefusals(t *testing.T) {
 			publisher.Failed{Reason: publisher.FailNodeModules, Paths: []string{"web/node_modules/x/index.js"}}},
 		{"path under .git", edit(".git/hooks/pre-commit", "x\n"),
 			publisher.Failed{Reason: publisher.FailGitDir, Paths: []string{".git/hooks/pre-commit"}}},
+		{"refused path holds the loaded value: redacted", edit("web/node_modules/"+loadedValue+"/i.js", "x\n"),
+			publisher.Failed{Reason: publisher.FailNodeModules, Paths: []string{"web/node_modules/[redacted]/i.js"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newPubEnv(t)
@@ -272,6 +278,40 @@ func TestPrepare_Secrets(t *testing.T) {
 	})
 }
 
+func TestPrepare_SecretsInPathNames(t *testing.T) {
+	tok := "gh" + "p_" + strings.Repeat("X7", 18)
+	for _, tc := range []struct {
+		name     string
+		path     string
+		secret   string
+		patterns []string
+		want     string
+	}{
+		{"added file name holds the loaded value", "src/" + loadedValue + ".txt", loadedValue, nil, "src/[redacted].txt"},
+		{"added file name holds a pattern-shaped token", "notes/" + tok + ".txt", tok, []string{"github-token"}, "notes/[redacted].txt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newPubEnv(t)
+			before := e.commits(t)
+			got := asType[publisher.NeedsOwner](t, prepare(t, e, e.input(t, edit(tc.path, "harmless\n"))))
+			if got.Stop != publisher.StopSecrets || !got.HitStop || !got.FailedRun {
+				t.Errorf("needs owner %+v, want secrets stop, hit stop, failed run", got)
+			}
+			if !reflect.DeepEqual(got.SecretPatterns, tc.patterns) || !reflect.DeepEqual(got.Paths, []string{tc.want}) {
+				t.Errorf("patterns %q paths %q, want %q and [%s]", got.SecretPatterns, got.Paths, tc.patterns, tc.want)
+			}
+			if all := fmt.Sprintf("%#v", got); strings.Contains(all, tc.secret) {
+				t.Errorf("outcome leaks the secret: %s", all)
+			}
+			noSideEffects(t, e, before)
+		})
+	}
+	t.Run("modified file whose base name holds a token: not refused", func(t *testing.T) {
+		e := newPubEnv(t)
+		asType[publisher.Ready](t, prepare(t, e, e.input(t, edit(tokenName(), "changed\n"))))
+	})
+}
+
 // symlinkPatch adds the symlink link pointing at README.
 const symlinkPatch = "diff --git a/link b/link\nnew file mode 120000\n--- /dev/null\n+++ b/link\n@@ -0,0 +1 @@\n+README\n\\ No newline at end of file\n"
 
@@ -290,6 +330,17 @@ func TestPrepare_PathPolicy(t *testing.T) {
 			noSideEffects(t, e, before)
 		})
 	}
+	t.Run("mention in a forbidden path: sanitized in the question only", func(t *testing.T) {
+		e := newPubEnv(t)
+		path := "@org/.claude/x.json"
+		got := asType[publisher.NeedsOwner](t, prepare(t, e, e.input(t, edit(path, "x\n"))))
+		if strings.Contains(got.Question, "@org") || !strings.Contains(got.Question, "org/.claude/x.json") {
+			t.Errorf("question %q: want the path without the mention", got.Question)
+		}
+		if !reflect.DeepEqual(got.Forbidden, []string{path}) {
+			t.Errorf("forbidden %q, want [%s]", got.Forbidden, path)
+		}
+	})
 	t.Run("added symlink", func(t *testing.T) {
 		e := newPubEnv(t)
 		before := e.commits(t)
@@ -458,6 +509,11 @@ func TestPrepare_InvalidInput(t *testing.T) {
 		{name: "branch with trailing /", in: func(in *publisher.Input) { in.Branch = "ddf/" }},
 		{name: "branch ending .lock", in: func(in *publisher.Input) { in.Branch = "ddf.lock" }},
 		{name: "branch with a space", in: func(in *publisher.Input) { in.Branch = "a b" }},
+		{name: "branch with //", in: func(in *publisher.Input) { in.Branch = "a//b" }},
+		{name: "component starting with .", in: func(in *publisher.Input) { in.Branch = "ddf/.x" }},
+		{name: "branch starting with .", in: func(in *publisher.Input) { in.BaseBranch = ".main" }},
+		{name: "component ending .lock", in: func(in *publisher.Input) { in.Branch = "a.lock/b" }},
+		{name: "branch equals base branch", in: func(in *publisher.Input) { in.Branch = in.BaseBranch }},
 		{name: "short base", in: func(in *publisher.Input) { in.Base = "abc" }},
 		{name: "changed-from not a sha", in: func(in *publisher.Input) { in.ChangedFrom = "HEAD" }},
 		{name: "planner risk revert", in: func(in *publisher.Input) { in.PlannerRisk = model.RiskClassRevert }},
