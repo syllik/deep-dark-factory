@@ -368,14 +368,16 @@ A revision whose changed paths (§6.2) touch a forbidden path or hold an added o
 
 The merge is pinned to the evaluated head (GitHub: merge with the `sha` parameter; `forge-local`: compare-and-swap ref update). A moved head fails the merge.
 
-**Review signatures:** Ed25519 with a private key only the daemon holds (Secrets port), over the canonical JSON (sorted keys, UTF-8, integers, no floats) of `{version, keyId, taskKey, forge, repository, changeId, head, role, verdict, blockingCount, findingsDigest}`, where `findingsDigest` is SHA-256 of the canonical JSON array of findings.
+**Review signatures:** Ed25519 with a private key only the daemon holds (Secrets port), over the canonical JSON (RFC 8785 restricted to objects, arrays, strings and non-negative integers: keys sorted, UTF-8, no whitespace, no floats, no null or booleans) of `{version, keyId, taskKey, forge, repository, changeId, head, role, round, verdict, blockingCount, findingsDigest}`, where `findingsDigest` is the lowercase hex SHA-256 of the canonical JSON array of the review's findings in the reviewer-result shape (§6.3; absent optional keys omitted), sorted by `id`.
 - `version` is the string `ddf.review-signature/v1`.
 - `keyId` is the lowercase hex of the first 16 bytes of SHA-256 over the raw 32-byte public key.
 - The signature is standard padded base64 of the 64-byte Ed25519 signature.
-- The gate rejects an unknown `version`, an unknown `keyId` or a bad signature (fail-closed).
+- The gate verifies every stored review of a required role and rejects an unknown `version`, an unknown `keyId` or a bad signature (fail-closed).
+- `round` numbers a role's reviews on one change: 1 for the first stored review of that role on the change, otherwise one more than that role's previous stored review; the daemon assigns it when it stores the review. Condition 4 looks only at each required role's review with the highest `round` on the change, so an older APPROVE never counts once a later review of that role exists, even for the same head; a `round` held by two reviews of one role refuses.
+- Threat model: the signature binds a verdict to (task, change, head, role, round), so review evidence cannot be created, altered or moved to another task, change, head, role or round by anything without the private key: agents and reviewer runs (which never hold it, §4.4), forge comments, and any writer of the store file other than the daemon. It does not protect against the daemon process itself or a holder of the key, and it does not detect a deleted or rolled-back review row (removing the latest round lets the previous one count) or a change to other store state; those rely on the ownership and modes of the `data` and `secrets` locations (§8.1).
 - Key rotation is M5.
 
-The gate reads reviews from the store and verifies signatures; forge comments are a projection. On GitHub, reviewer Apps also submit native reviews (APPROVE / REQUEST_CHANGES) and re-approve after a sync.
+The gate reads reviews from the store and verifies signatures; forge comments, task-key markers and native forge reviews are projections and never gate evidence. On GitHub, reviewer Apps also submit native reviews (APPROVE / REQUEST_CHANGES) and re-approve after a sync.
 
 ### 6.7 Project profile
 
@@ -659,7 +661,7 @@ Each milestone gets its own implementation plan.
 - On the private pilot product, three real tasks go from intake to merge into the integration branch with no human action; at least one goes through a correction batch; at least one `needs-owner` question/answer round trip via the CLI (Telegram deferred to V1.1).
 - M5 acceptance runs on a small always-on arm64 Linux host in the Linux container profile (reference deployment). Development and probes imitate this weak host in a Linux arm64 VM limited to 1 vCPU and 1–2 GB. The second runtime profile passes the same probes.
 - Probes, each must hold:
-  1. a forged or replayed review marker is rejected;
+  1. the merge gate accepts no stored review whose signature is forged, made with an unknown key ID or version, or copied from another task, change, head, role or round, and no review superseded by a later round of its role; forge comments and markers are never review evidence;
   2. a reviewer cannot be made to approve through workspace agent config (planted hooks/settings are ignored);
   3. a change touching a forbidden path or a symlink is not published;
   4. planted Git hooks/config in the Executor copy never run on the host;
@@ -781,3 +783,4 @@ Answers, evidence and probe definitions: `docs/research/2026-11-m0-facts.md`; de
 - 2026-11-15 Issue #76: §8.3 — path policy on the changed paths of the applied tree; agent directories follow the forbidden-path flow, `node_modules/` additions keep their outcome (PR #75 review r2-2, r1-1)
 - 2026-11-15 Issue #76: §12 — git helper and clean clone `internal/core/workspace/git/**` added to the `sensitive` paths (PR #75 review r2-1)
 - 2026-11-17 Issue #110: §4.5, §5.2, §6.3 — finding identity across review rounds by the reviewer-carried `priorId` naming a finding of the same role's prior review; the core compares IDs only; `prior_id` holds it; validity rules and blocking-twice by `priorId` (#43 answer 7, see .ai/decisions.md)
+- 2026-11-25 Issue #124: §6.6 — review signatures: `round` in the payload and the gate uses each role's latest round; canonical JSON is restricted RFC 8785; `findingsDigest` over findings sorted by `id`; threat model stated; markers are never evidence. §14.1 — probe 1 names what the gate reads (#43 audit P2-8, see .ai/decisions.md)
