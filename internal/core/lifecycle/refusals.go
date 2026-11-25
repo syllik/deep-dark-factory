@@ -58,9 +58,11 @@ var rows = map[gate.Reason]row{
 
 // RouteRefusals maps the gate decision for a task in merge to its outcome
 // (lifecycle.md#merge-refusals). asked lists the heads already asked about
-// for a hard stop or path policy. No refusal is ActionMerge. A flagged task
-// is mapped too (see the package comment); invalid-input and task-not-merge
-// are errors, never a transition.
+// for a hard stop or path policy. No refusal is ActionMerge only for an
+// unflagged task without hit_stop: with no refusals, a flagged task is
+// ErrFlagged and a task with hit_stop is ErrInvalidInput. A flagged task with
+// refusals is mapped too (see the package comment); invalid-input and
+// task-not-merge are errors, never a transition.
 func RouteRefusals(d gate.Decision, s Status, asked []string) (Outcome, error) {
 	if err := validateState(s); err != nil {
 		return Outcome{}, err
@@ -68,6 +70,12 @@ func RouteRefusals(d gate.Decision, s Status, asked []string) (Outcome, error) {
 	if len(d.Refusals) == 0 {
 		if s.State != model.TaskStateMerge {
 			return Outcome{}, fmt.Errorf("%w: merge allowed in state %s", ErrInvalidInput, s.State)
+		}
+		if len(s.Flags) > 0 {
+			return Outcome{}, fmt.Errorf("%w: merge allowed with flags %v", ErrFlagged, s.Flags)
+		}
+		if s.HitStop {
+			return Outcome{}, fmt.Errorf("%w: merge allowed with hit_stop", ErrInvalidInput)
 		}
 		return Outcome{State: s.State, Action: ActionMerge}, nil
 	}

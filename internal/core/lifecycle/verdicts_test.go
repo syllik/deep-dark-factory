@@ -7,6 +7,7 @@ import (
 
 	"github.com/syllik/deep-dark-factory/internal/core/lifecycle"
 	"github.com/syllik/deep-dark-factory/internal/core/model"
+	"github.com/syllik/deep-dark-factory/internal/core/policy"
 )
 
 func TestRoutePlanner(t *testing.T) {
@@ -90,25 +91,63 @@ func withChecklist(r lifecycle.ReviewResult, s lifecycle.ChecklistStatus) lifecy
 	return r
 }
 
+func clearChecklist(r lifecycle.ReviewResult) lifecycle.ReviewResult {
+	return withChecklist(r, lifecycle.ChecklistClear)
+}
+
+func reviewers(t *testing.T, c model.RiskClass) []policy.Reviewer {
+	t.Helper()
+	rs, err := policy.Reviewers(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rs
+}
+
 func TestRouteReview(t *testing.T) {
 	rv := st(model.TaskStateReview)
-	both := []model.Role{model.RoleR1, model.RoleR2}
-	r1only := []model.Role{model.RoleR1}
+	both := reviewers(t, model.RiskClassStandard) // R2 runs the checklist
+	r1only := reviewers(t, model.RiskClassLow)    // R1 runs the checklist
 	p1 := finding(model.SeverityP1, model.FindingCategoryCorrectness)
 	hs := finding(model.SeverityP1, model.FindingCategoryHardStop)
+	ok := clearChecklist
 
 	t.Run("missing required result", func(t *testing.T) {
 		_, err := lifecycle.RouteReview(rv, "h1", both, []lifecycle.ReviewResult{approve(model.RoleR1, "h1")})
 		checkErr(t, err, lifecycle.ErrInvalidInput)
 	})
 	t.Run("result for another head", func(t *testing.T) {
-		_, err := lifecycle.RouteReview(rv, "h1", r1only, []lifecycle.ReviewResult{approve(model.RoleR1, "h0")})
+		_, err := lifecycle.RouteReview(rv, "h1", r1only, []lifecycle.ReviewResult{ok(approve(model.RoleR1, "h0"))})
 		checkErr(t, err, lifecycle.ErrInvalidInput)
 	})
 	t.Run("REQUEST_CHANGES without blocking", func(t *testing.T) {
 		_, err := lifecycle.RouteReview(rv, "h1", r1only, []lifecycle.ReviewResult{
-			requestChanges(model.RoleR1, "h1", finding(model.SeverityP2, model.FindingCategoryDocs)),
+			ok(requestChanges(model.RoleR1, "h1", finding(model.SeverityP2, model.FindingCategoryDocs))),
 		})
+		checkErr(t, err, lifecycle.ErrInvalidInput)
+	})
+	t.Run("r1-only approve without checklist is invalid", func(t *testing.T) {
+		got, err := lifecycle.RouteReview(rv, "h1", r1only, []lifecycle.ReviewResult{approve(model.RoleR1, "h1")})
+		checkErr(t, err, lifecycle.ErrInvalidInput)
+		if got.State == model.TaskStateMerge || got.Action == lifecycle.ActionMerge {
+			t.Fatal("merged without a checklist")
+		}
+	})
+	t.Run("r2 approve with empty checklist is invalid", func(t *testing.T) {
+		r2 := approve(model.RoleR2, "h1")
+		r2.Checklist = []lifecycle.ChecklistItem{}
+		got, err := lifecycle.RouteReview(rv, "h1", both, []lifecycle.ReviewResult{approve(model.RoleR1, "h1"), r2})
+		checkErr(t, err, lifecycle.ErrInvalidInput)
+		if got.State == model.TaskStateMerge || got.Action == lifecycle.ActionMerge {
+			t.Fatal("merged with an empty checklist")
+		}
+	})
+	t.Run("hard-stop finding without checklist is invalid", func(t *testing.T) {
+		_, err := lifecycle.RouteReview(rv, "h1", r1only, []lifecycle.ReviewResult{requestChanges(model.RoleR1, "h1", hs)})
+		checkErr(t, err, lifecycle.ErrInvalidInput)
+	})
+	t.Run("blocking finding without checklist is invalid", func(t *testing.T) {
+		_, err := lifecycle.RouteReview(rv, "h1", both, []lifecycle.ReviewResult{approve(model.RoleR1, "h1"), requestChanges(model.RoleR2, "h1", p1)})
 		checkErr(t, err, lifecycle.ErrInvalidInput)
 	})
 	t.Run("unassessed reruns reviewer before findings", func(t *testing.T) {
@@ -119,8 +158,23 @@ func TestRouteReview(t *testing.T) {
 		check(t, got, err, lifecycle.Outcome{State: model.TaskStateReview, Action: lifecycle.ActionRerunReviewer,
 			Roles: []model.Role{model.RoleR2}, Reason: "hard-stop checklist item unassessed"})
 	})
+	t.Run("optional checklist unassessed reruns that reviewer", func(t *testing.T) {
+		got, err := lifecycle.RouteReview(rv, "h1", both, []lifecycle.ReviewResult{
+			withChecklist(approve(model.RoleR1, "h1"), lifecycle.ChecklistUnassessed),
+			ok(approve(model.RoleR2, "h1")),
+		})
+		check(t, got, err, lifecycle.Outcome{State: model.TaskStateReview, Action: lifecycle.ActionRerunReviewer,
+			Roles: []model.Role{model.RoleR1}, Reason: "hard-stop checklist item unassessed"})
+	})
+	t.Run("optional checklist hit needs owner", func(t *testing.T) {
+		got, err := lifecycle.RouteReview(rv, "h1", both, []lifecycle.ReviewResult{
+			withChecklist(approve(model.RoleR1, "h1"), lifecycle.ChecklistHit),
+			ok(approve(model.RoleR2, "h1")),
+		})
+		check(t, got, err, lifecycle.Outcome{State: model.TaskStateReview, Flag: model.TaskFlagNeedsOwner, SetHitStop: true, Reason: "hard stop found in review"})
+	})
 	t.Run("hard-stop finding needs owner with hit_stop", func(t *testing.T) {
-		got, err := lifecycle.RouteReview(rv, "h1", r1only, []lifecycle.ReviewResult{requestChanges(model.RoleR1, "h1", hs)})
+		got, err := lifecycle.RouteReview(rv, "h1", r1only, []lifecycle.ReviewResult{ok(requestChanges(model.RoleR1, "h1", hs))})
 		check(t, got, err, lifecycle.Outcome{State: model.TaskStateReview, Flag: model.TaskFlagNeedsOwner, SetHitStop: true, Reason: "hard stop found in review"})
 	})
 	t.Run("checklist hit needs owner with hit_stop", func(t *testing.T) {
@@ -132,18 +186,18 @@ func TestRouteReview(t *testing.T) {
 	})
 	t.Run("blocking finding to fixing", func(t *testing.T) {
 		got, err := lifecycle.RouteReview(rv, "h1", both, []lifecycle.ReviewResult{
-			approve(model.RoleR1, "h1"), requestChanges(model.RoleR2, "h1", p1),
+			approve(model.RoleR1, "h1"), ok(requestChanges(model.RoleR2, "h1", p1)),
 		})
 		check(t, got, err, lifecycle.Outcome{State: model.TaskStateFixing})
 	})
 	t.Run("security medium blocks to fixing", func(t *testing.T) {
 		f := finding(model.SeverityP2, model.FindingCategorySecurity)
 		f.SecurityLevel = model.SecurityLevelMedium
-		got, err := lifecycle.RouteReview(rv, "h1", r1only, []lifecycle.ReviewResult{requestChanges(model.RoleR1, "h1", f)})
+		got, err := lifecycle.RouteReview(rv, "h1", r1only, []lifecycle.ReviewResult{ok(requestChanges(model.RoleR1, "h1", f))})
 		check(t, got, err, lifecycle.Outcome{State: model.TaskStateFixing})
 	})
 	t.Run("r1 raiseRisk adds r2", func(t *testing.T) {
-		r := approve(model.RoleR1, "h1")
+		r := ok(approve(model.RoleR1, "h1"))
 		r.RaiseRisk = model.RiskClassStandard
 		got, err := lifecycle.RouteReview(rv, "h1", r1only, []lifecycle.ReviewResult{r})
 		check(t, got, err, lifecycle.Outcome{State: model.TaskStateReview, Action: lifecycle.ActionAddReviewer,
@@ -152,35 +206,39 @@ func TestRouteReview(t *testing.T) {
 	t.Run("r1 raiseRisk with r2 present merges", func(t *testing.T) {
 		r := approve(model.RoleR1, "h1")
 		r.RaiseRisk = model.RiskClassSensitive
-		got, err := lifecycle.RouteReview(rv, "h1", both, []lifecycle.ReviewResult{r, approve(model.RoleR2, "h1")})
+		got, err := lifecycle.RouteReview(rv, "h1", both, []lifecycle.ReviewResult{r, ok(approve(model.RoleR2, "h1"))})
 		check(t, got, err, lifecycle.Outcome{State: model.TaskStateMerge})
 	})
 	t.Run("all approve to merge", func(t *testing.T) {
 		r := approve(model.RoleR1, "h1")
 		r.Findings = []model.Finding{finding(model.SeverityP3, model.FindingCategoryDocs)}
-		got, err := lifecycle.RouteReview(rv, "h1", both, []lifecycle.ReviewResult{r, withChecklist(approve(model.RoleR2, "h1"), lifecycle.ChecklistClear)})
+		got, err := lifecycle.RouteReview(rv, "h1", both, []lifecycle.ReviewResult{r, ok(approve(model.RoleR2, "h1"))})
+		check(t, got, err, lifecycle.Outcome{State: model.TaskStateMerge})
+	})
+	t.Run("r1 only approve with checklist merges", func(t *testing.T) {
+		got, err := lifecycle.RouteReview(rv, "h1", r1only, []lifecycle.ReviewResult{ok(approve(model.RoleR1, "h1"))})
 		check(t, got, err, lifecycle.Outcome{State: model.TaskStateMerge})
 	})
 	t.Run("result outside the set", func(t *testing.T) {
-		_, err := lifecycle.RouteReview(rv, "h1", r1only, []lifecycle.ReviewResult{approve(model.RoleR1, "h1"), approve(model.RoleR2, "h1")})
+		_, err := lifecycle.RouteReview(rv, "h1", r1only, []lifecycle.ReviewResult{ok(approve(model.RoleR1, "h1")), ok(approve(model.RoleR2, "h1"))})
 		checkErr(t, err, lifecycle.ErrInvalidInput)
 	})
 	t.Run("invalid finding", func(t *testing.T) {
-		_, err := lifecycle.RouteReview(rv, "h1", r1only, []lifecycle.ReviewResult{requestChanges(model.RoleR1, "h1", finding("P9", model.FindingCategoryDocs))})
+		_, err := lifecycle.RouteReview(rv, "h1", r1only, []lifecycle.ReviewResult{ok(requestChanges(model.RoleR1, "h1", finding("P9", model.FindingCategoryDocs)))})
 		checkErr(t, err, lifecycle.ErrInvalidInput)
 	})
 	t.Run("not in review", func(t *testing.T) {
-		_, err := lifecycle.RouteReview(st(model.TaskStateCI), "h1", r1only, []lifecycle.ReviewResult{approve(model.RoleR1, "h1")})
+		_, err := lifecycle.RouteReview(st(model.TaskStateCI), "h1", r1only, []lifecycle.ReviewResult{ok(approve(model.RoleR1, "h1"))})
 		checkErr(t, err, lifecycle.ErrInvalidTransition)
 	})
 	t.Run("input not mutated", func(t *testing.T) {
-		req := []model.Role{model.RoleR1}
+		req := reviewers(t, model.RiskClassLow)
 		in := []lifecycle.ReviewResult{withChecklist(approve(model.RoleR1, "h1"), lifecycle.ChecklistUnassessed)}
 		before := []lifecycle.ReviewResult{withChecklist(approve(model.RoleR1, "h1"), lifecycle.ChecklistUnassessed)}
 		if _, err := lifecycle.RouteReview(rv, "h1", req, in); err != nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(in, before) || !reflect.DeepEqual(req, []model.Role{model.RoleR1}) {
+		if !reflect.DeepEqual(in, before) || !reflect.DeepEqual(req, reviewers(t, model.RiskClassLow)) {
 			t.Fatal("input mutated")
 		}
 	})

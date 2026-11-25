@@ -169,12 +169,14 @@ func summarize(r ReviewResult, head string) (reviewSummary, error) {
 
 // RouteReview routes the results of the required reviewers on head for a
 // task in review. Exactly one result per required role, all for head, is
-// expected; anything else is ErrInvalidInput. In order: an unassessed
-// checklist item reruns that reviewer; a hard-stop finding or checklist hit
-// raises needs-owner with hit_stop; a blocking finding goes to fixing; an R1
-// raiseRisk without R2 in the set adds R2; else every result approves and the
-// task goes to merge.
-func RouteReview(s Status, head string, required []model.Role, results []ReviewResult) (Outcome, error) {
+// expected; anything else is ErrInvalidInput. A reviewer with
+// HardStopChecklist must send a non-empty checklist, else ErrInvalidInput;
+// another reviewer may send one and its items count the same. In order: an
+// unassessed checklist item reruns that reviewer; a hard-stop finding or
+// checklist hit raises needs-owner with hit_stop; a blocking finding goes to
+// fixing; an R1 raiseRisk without R2 in the set adds R2; else every result
+// approves and the task goes to merge.
+func RouteReview(s Status, head string, required []policy.Reviewer, results []ReviewResult) (Outcome, error) {
 	if err := validate(s); err != nil {
 		return Outcome{}, err
 	}
@@ -184,9 +186,13 @@ func RouteReview(s Status, head string, required []model.Role, results []ReviewR
 	if head == "" || len(required) == 0 {
 		return Outcome{}, fmt.Errorf("%w: empty head or reviewer set", ErrInvalidInput)
 	}
+	roles := make([]model.Role, len(required))
+	for i, rv := range required {
+		roles[i] = rv.Role
+	}
 	byRole := map[model.Role]ReviewResult{}
 	for _, r := range results {
-		if !slices.Contains(required, r.Role) {
+		if !slices.Contains(roles, r.Role) {
 			return Outcome{}, fmt.Errorf("%w: result for role %q not in the reviewer set", ErrInvalidInput, r.Role)
 		}
 		if _, dup := byRole[r.Role]; dup {
@@ -195,16 +201,20 @@ func RouteReview(s Status, head string, required []model.Role, results []ReviewR
 		byRole[r.Role] = r
 	}
 	sums := make([]reviewSummary, len(required))
-	for i, role := range required {
+	for i, rv := range required {
+		role := rv.Role
 		if role != model.RoleR1 && role != model.RoleR2 {
 			return Outcome{}, fmt.Errorf("%w: reviewer role %q", ErrInvalidInput, role)
 		}
-		if slices.Index(required, role) != i {
+		if slices.Index(roles, role) != i {
 			return Outcome{}, fmt.Errorf("%w: duplicate required role %s", ErrInvalidInput, role)
 		}
 		r, ok := byRole[role]
 		if !ok {
 			return Outcome{}, fmt.Errorf("%w: missing result for %s", ErrInvalidInput, role)
+		}
+		if rv.HardStopChecklist && len(r.Checklist) == 0 {
+			return Outcome{}, fmt.Errorf("%w: %s result without the hard-stop checklist", ErrInvalidInput, role)
 		}
 		sum, err := summarize(r, head)
 		if err != nil {
@@ -217,7 +227,7 @@ func RouteReview(s Status, head string, required []model.Role, results []ReviewR
 	hardStop, blocking := false, false
 	for i, sum := range sums {
 		if sum.unassessed {
-			rerun = append(rerun, required[i])
+			rerun = append(rerun, roles[i])
 		}
 		hardStop = hardStop || sum.hardStop
 		blocking = blocking || sum.blocking > 0
@@ -232,7 +242,7 @@ func RouteReview(s Status, head string, required []model.Role, results []ReviewR
 	case blocking:
 		return Outcome{State: model.TaskStateFixing}, nil
 	}
-	if r1, ok := byRole[model.RoleR1]; ok && r1.RaiseRisk != "" && !slices.Contains(required, model.RoleR2) {
+	if r1, ok := byRole[model.RoleR1]; ok && r1.RaiseRisk != "" && !slices.Contains(roles, model.RoleR2) {
 		return Outcome{State: s.State, Action: ActionAddReviewer, Roles: []model.Role{model.RoleR2}, Risk: r1.RaiseRisk, Reason: "r1 raised risk to " + string(r1.RaiseRisk)}, nil
 	}
 	// Every result is APPROVE here: a REQUEST_CHANGES has a blocking finding.

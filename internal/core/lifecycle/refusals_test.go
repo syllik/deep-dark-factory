@@ -41,6 +41,9 @@ func TestRouteRefusals(t *testing.T) {
 		err   error
 	}{
 		{name: "no refusals merges", d: decision("h1"), s: merge, want: Outcome{State: model.TaskStateMerge, Action: ActionMerge}},
+		{name: "no refusals outside merge", d: decision("h1"), s: Status{State: model.TaskStateCI}, err: ErrInvalidInput},
+		{name: "no refusals with a flag", d: decision("h1"), s: Status{State: model.TaskStateMerge, Flags: []model.TaskFlag{model.TaskFlagHold}}, err: ErrFlagged},
+		{name: "no refusals with hit_stop", d: decision("h1"), s: Status{State: model.TaskStateMerge, HitStop: true}, err: ErrInvalidInput},
 		{name: "invalid-input is an error", d: decision("h1", gate.ReasonInvalidInput), s: merge, err: ErrInvalidInput},
 		{name: "task-not-merge is an error", d: decision("h1", gate.ReasonTaskState), s: Status{State: model.TaskStateCI}, err: ErrInvalidTransition},
 		{name: "read-error backoff", d: decision("h1", gate.ReasonReadError), s: merge, want: Outcome{State: model.TaskStateMerge, Action: ActionBackoff, Reason: "read-error"}},

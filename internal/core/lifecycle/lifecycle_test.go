@@ -7,6 +7,7 @@ import (
 
 	"github.com/syllik/deep-dark-factory/internal/core/lifecycle"
 	"github.com/syllik/deep-dark-factory/internal/core/model"
+	"github.com/syllik/deep-dark-factory/internal/core/policy"
 )
 
 func st(s model.TaskState, flags ...model.TaskFlag) lifecycle.Status {
@@ -107,7 +108,7 @@ func TestFlags(t *testing.T) {
 				"review": func() error {
 					p := flagged
 					p.State = model.TaskStateReview
-					_, err := lifecycle.RouteReview(p, "h1", []model.Role{model.RoleR1}, []lifecycle.ReviewResult{approve(model.RoleR1, "h1")})
+					_, err := lifecycle.RouteReview(p, "h1", []policy.Reviewer{{Role: model.RoleR1, HardStopChecklist: true}}, []lifecycle.ReviewResult{approve(model.RoleR1, "h1")})
 					return err
 				},
 				"merge": func() error {

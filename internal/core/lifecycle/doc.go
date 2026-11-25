@@ -22,10 +22,15 @@
 // itself reports the flag as a flag-* refusal, which maps to stay. The fixed
 // precedence when a Decision holds several refusals is: errors > stay with
 // backoff > hold > flag or pause stay > needs-owner (unasked head) > sync >
-// ci > review > hit_stop or autonomy stay.
+// ci > review > hit_stop or autonomy stay. A Decision with no refusals merges
+// only an unflagged task without hit_stop: a flagged task is ErrFlagged and a
+// task with hit_stop is ErrInvalidInput.
 //
-// RouteReview takes the hard-stop checklist as typed items; ParseChecklist
-// decodes the verbatim JSON kept in model.Review.HardStopChecklist into them.
+// RouteReview takes the required reviewer set as []policy.Reviewer and the
+// hard-stop checklist as typed items; ParseChecklist decodes the verbatim JSON
+// kept in model.Review.HardStopChecklist into them. A missing or empty
+// checklist from a reviewer with HardStopChecklist is ErrInvalidInput, so it
+// never reaches merge, fixing or needs-owner.
 //
 // The package keeps no state: the caller passes the heads already asked
 // about for a hard stop or path policy, and an Outcome names the head to
