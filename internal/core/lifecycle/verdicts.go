@@ -132,6 +132,8 @@ func summarize(r ReviewResult, head string) (reviewSummary, error) {
 	}
 	switch r.RaiseRisk {
 	case "", model.RiskClassStandard, model.RiskClassSensitive:
+	case model.RiskClassDocs, model.RiskClassLow, model.RiskClassRevert:
+		return sum, fmt.Errorf("%w: %s: raiseRisk %q", ErrInvalidInput, r.Role, r.RaiseRisk)
 	default:
 		return sum, fmt.Errorf("%w: %s: raiseRisk %q", ErrInvalidInput, r.Role, r.RaiseRisk)
 	}

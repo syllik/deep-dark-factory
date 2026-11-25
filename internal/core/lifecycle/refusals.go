@@ -111,8 +111,9 @@ func RouteRefusals(d gate.Decision, s Status, asked []string) (Outcome, error) {
 		return Outcome{State: model.TaskStateCI, Reason: reason}, nil
 	case rowReview:
 		return Outcome{State: model.TaskStateReview, Reason: reason}, nil
+	case rowStay, rowHitStop:
+		// Stay, no new needs-owner: handled below.
 	}
-	// rowStay and rowHitStop: stay, no new needs-owner.
 	o := stay(s)
 	o.Reason = reason
 	return o, nil
