@@ -13,6 +13,7 @@ import (
 	"github.com/syllik/deep-dark-factory/internal/adapters/forge/local"
 	"github.com/syllik/deep-dark-factory/internal/adapters/sandbox/fake"
 	"github.com/syllik/deep-dark-factory/internal/core/ports"
+	"github.com/syllik/deep-dark-factory/internal/core/workspace/git"
 )
 
 func TestOpen_CreatesMissingStorage(t *testing.T) {
@@ -207,6 +208,22 @@ func TestOpen_RefusesConfig(t *testing.T) {
 		{"integration branch with space", func(c *local.Config) { c.IntegrationBranch = "a b" }},
 		{"integration branch ending in .lock", func(c *local.Config) { c.IntegrationBranch = "main.lock" }},
 		{"integration branch with trailing slash", func(c *local.Config) { c.IntegrationBranch = "main/" }},
+		{"empty branch pattern", func(c *local.Config) { c.BranchPattern = "" }},
+		{"branch pattern with unknown placeholder", func(c *local.Config) { c.BranchPattern = "{type}/{x}-{n}-{slug}" }},
+		{"branch pattern with stray open brace", func(c *local.Config) { c.BranchPattern = "{type}/issue-{n}-{slug" }},
+		{"branch pattern with stray close brace", func(c *local.Config) { c.BranchPattern = "{type}/issue-{n}-{slug}}" }},
+		{"branch pattern without n", func(c *local.Config) { c.BranchPattern = "{type}/issue-{slug}" }},
+		{"branch pattern without slug", func(c *local.Config) { c.BranchPattern = "{type}/issue-{n}" }},
+		{"empty identity name", func(c *local.Config) { c.Identity.Name = "" }},
+		{"empty identity email", func(c *local.Config) { c.Identity.Email = "" }},
+		{"identity name with <", func(c *local.Config) { c.Identity.Name = "a<b" }},
+		{"identity name with >", func(c *local.Config) { c.Identity.Name = "a>b" }},
+		{"identity name with newline", func(c *local.Config) { c.Identity.Name = "a\nb" }},
+		{"identity name with NUL", func(c *local.Config) { c.Identity.Name = "a\x00b" }},
+		{"identity email with <", func(c *local.Config) { c.Identity.Email = "<a@example.invalid" }},
+		{"identity email with >", func(c *local.Config) { c.Identity.Email = "a@example.invalid>" }},
+		{"identity email with newline", func(c *local.Config) { c.Identity.Email = "a@example.invalid\n" }},
+		{"identity email with NUL", func(c *local.Config) { c.Identity.Email = "a\x00@example.invalid" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t)
@@ -218,6 +235,15 @@ func TestOpen_RefusesConfig(t *testing.T) {
 				t.Errorf("storage written despite a config error: %v", err)
 			}
 		})
+	}
+}
+
+func TestOpen_AcceptsBranchPatternAndIdentity(t *testing.T) {
+	e := newEnv(t)
+	e.cfg.BranchPattern = "{type}/issue-{n}-{slug}"
+	e.cfg.Identity = git.Identity{Name: "DDF Daemon", Email: "ddf@example.invalid"}
+	if _, err := local.Open(context.Background(), e.cfg); err != nil {
+		t.Fatalf("open: %v", err)
 	}
 }
 

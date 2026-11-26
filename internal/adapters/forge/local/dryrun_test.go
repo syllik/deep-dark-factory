@@ -17,13 +17,16 @@ const (
 )
 
 // dryRunFixture is what dryRunEnv set up: task 1 with its source, a new
-// key, an open change with its head, and a pushed but unpublished branch.
+// key, an open change with its head, a pushed but unpublished branch, and
+// task 2 whose change is merged.
 type dryRunFixture struct {
 	src       model.TaskSource
 	key       model.TaskKey
 	change    ports.ChangeInfo
 	newBranch string
 	newHead   string
+	mergedKey model.TaskKey
+	mergeSHA  string
 }
 
 // dryRunCall runs one write with mode and reports whether its result is
@@ -72,12 +75,24 @@ func dryRunCalls() []dryRunCall {
 		{"RerunChecks", func(f *local.Forge, fx dryRunFixture, mode ports.WriteMode) (bool, error) {
 			return true, f.RerunChecks(ctx, mode, fx.change.HeadSHA)
 		}},
+		{"Merge", func(f *local.Forge, fx dryRunFixture, mode ports.WriteMode) (bool, error) {
+			sha, err := f.Merge(ctx, mode, fx.change.ID, fx.change.HeadSHA)
+			return sha == "", err
+		}},
+		{"UpdateBranchFromBase", func(f *local.Forge, fx dryRunFixture, mode ports.WriteMode) (bool, error) {
+			sha, err := f.UpdateBranchFromBase(ctx, mode, fx.change.ID)
+			return sha == "", err
+		}},
+		{"Revert", func(f *local.Forge, fx dryRunFixture, mode ports.WriteMode) (bool, error) {
+			info, err := f.Revert(ctx, mode, fx.mergedKey, fx.mergeSHA)
+			return info == (ports.ChangeInfo{}), err
+		}},
 	}
 }
 
 // dryRunEnv opens a project holding task 1, an un-ingested inbox file
-// with the secret title and body, an open change on feat/a and a pushed,
-// unpublished branch feat/new.
+// with the secret title and body, an open change on feat/a, a pushed,
+// unpublished branch feat/new, and task 2 with a merged change on feat/m.
 func dryRunEnv(t *testing.T) (*env, *local.Forge, dryRunFixture) {
 	t.Helper()
 	e := newEnv(t)
@@ -87,6 +102,14 @@ func dryRunEnv(t *testing.T) (*env, *local.Forge, dryRunFixture) {
 	fx.change = publish(t, f, publishReq(testKey(t, "existing"), "feat/a", head))
 	fx.newBranch = "feat/new"
 	fx.newHead = e.commitOn(t, fx.newBranch, "new.txt", "new\n")
+	fx.mergedKey = testKey(t, "merged")
+	createTask(t, f, fx.mergedKey, "Merged")
+	merged := publish(t, f, publishReq(fx.mergedKey, "feat/m", e.commitOn(t, "feat/m", "m.txt", "m\n")))
+	sha, err := f.Merge(ctx, ports.WriteModeLive, merged.ID, merged.HeadSHA)
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	fx.mergeSHA = sha
 	e.drop(t, "dry.task.md", taskText(secretTitle, secretBody))
 	e.logs.Reset()
 	return e, f, fx

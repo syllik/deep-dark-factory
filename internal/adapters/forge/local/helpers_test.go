@@ -32,6 +32,12 @@ const (
 
 var testStart = time.Date(2026, 11, 25, 10, 0, 0, 0, time.UTC)
 
+// testIdentity is the Config.Identity of every test project.
+var testIdentity = git.Identity{Name: "DDF Test Daemon", Email: "daemon@example.invalid"}
+
+// testBranchPattern is the Config.BranchPattern of every test project.
+const testBranchPattern = "{type}/issue-{n}-{slug}"
+
 // env is one test project: a data dir, a real bare remote seeded through a
 // work repository, the clean clone and run dirs, a fake sandbox host, a
 // fixed clock and a captured logger.
@@ -156,6 +162,8 @@ func newEnv(t *testing.T) *env {
 		Git:               r,
 		Sandbox:           e.sandbox,
 		Verify:            []string{"make verify"},
+		BranchPattern:     testBranchPattern,
+		Identity:          testIdentity,
 	}
 	return e
 }
@@ -196,6 +204,86 @@ func (e *env) commitOn(t *testing.T, branch, name, content string) string {
 	sha := gitOut(t, e.git, e.work, "rev-parse", "HEAD")
 	gitOut(t, e.git, e.work, "push", "-q", "origin", "refs/heads/"+branch+":refs/heads/"+branch)
 	return sha
+}
+
+// pushTo pushes the existing commit sha from the work repository to
+// refs/heads/<branch> of the bare remote; the update must be a creation or
+// a fast-forward.
+func (e *env) pushTo(t *testing.T, sha, branch string) {
+	t.Helper()
+	gitOut(t, e.git, e.work, "push", "-q", "origin", sha+":refs/heads/"+branch)
+}
+
+// commitTreeOn writes, in the work repository, a commit of the tree of
+// treeOf with the given parents and message, and returns its SHA. The work
+// repository must have both objects (push from it or fetch first).
+func (e *env) commitTreeOn(t *testing.T, treeOf string, msg string, parents ...string) string {
+	t.Helper()
+	args := []string{"commit-tree", treeOf + "^{tree}", "-m", msg}
+	for _, p := range parents {
+		args = append(args, "-p", p)
+	}
+	return gitOut(t, e.git, e.work, args...)
+}
+
+// fetchWork fetches every branch of the bare remote into refs/remotes/
+// origin/ of the work repository, so it holds commits the Forge pushed.
+func (e *env) fetchWork(t *testing.T) {
+	t.Helper()
+	gitOut(t, e.git, e.work, "fetch", "-q", "origin")
+}
+
+// remoteTip returns the SHA refs/heads/<branch> names on the bare remote.
+func (e *env) remoteTip(t *testing.T, branch string) string {
+	t.Helper()
+	return gitOut(t, e.git, e.remote, "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}")
+}
+
+// rawCommit returns the header and the message of commit sha on the bare
+// remote, split at the first blank line; the message keeps its bytes.
+func (e *env) rawCommit(t *testing.T, sha string) (header, message string) {
+	t.Helper()
+	out, err := e.git.Run(context.Background(), e.remote, nil, "cat-file", "commit", sha)
+	if err != nil {
+		t.Fatalf("cat-file commit %s: %v", sha, err)
+	}
+	h, m, ok := strings.Cut(string(out), "\n\n")
+	if !ok {
+		t.Fatalf("commit %s has no message separator: %q", sha, out)
+	}
+	return h, m
+}
+
+// parents returns the parent SHAs of commit sha on the bare remote, in
+// order.
+func (e *env) parents(t *testing.T, sha string) []string {
+	t.Helper()
+	fields := strings.Fields(gitOut(t, e.git, e.remote, "rev-list", "--parents", "-n", "1", sha))
+	if len(fields) == 0 || fields[0] != sha {
+		t.Fatalf("rev-list --parents %s: %v", sha, fields)
+	}
+	return fields[1:]
+}
+
+// treeOn returns the tree SHA of commit sha on the bare remote.
+func (e *env) treeOn(t *testing.T, sha string) string {
+	t.Helper()
+	return gitOut(t, e.git, e.remote, "rev-parse", "--verify", sha+"^{tree}")
+}
+
+// checkHeads returns the names under checks/, one per head with an
+// attempt.
+func (e *env) checkHeads(t *testing.T) []string {
+	t.Helper()
+	entries, err := os.ReadDir(e.path("checks"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := []string{}
+	for _, en := range entries {
+		out = append(out, en.Name())
+	}
+	return out
 }
 
 // remoteRefs lists every ref of the bare remote with its object name.

@@ -70,6 +70,87 @@ type Config struct {
 	Limits ports.CellLimits
 	// Egress are the check cell's allowed egress destinations.
 	Egress []string
+
+	// BranchPattern is the profile's change.branch, for example
+	// `{type}/issue-{n}-{slug}`. It may use only the placeholders {type},
+	// {n} and {slug}, and must use {n} and {slug} (Task 10c agentDefault 5).
+	// Revert names its branch with it.
+	BranchPattern string
+	// Identity is the author and committer of every commit the adapter
+	// writes: squash merges, base merges and reverts.
+	Identity git.Identity
+
+	// beforeMergePush is the test hook of the lease window (Task 10c
+	// agentDefault 9): Merge calls it with f.mu held, after CommitTree and
+	// before the final fetch and change-tip re-check. It is unexported, so
+	// it is nil in production; only export_test.go sets it.
+	beforeMergePush func()
+}
+
+// Branch pattern placeholders (Task 10c agentDefault 5).
+const (
+	placeholderType = "{type}"
+	placeholderN    = "{n}"
+	placeholderSlug = "{slug}"
+)
+
+// validateBranchPattern refuses an empty pattern, a `{` that does not open
+// {type}, {n} or {slug}, a stray `}`, and a pattern without {n} or without
+// {slug} (Task 10c agentDefault 5).
+func validateBranchPattern(p string) error {
+	if p == "" {
+		return errors.New("empty branch pattern")
+	}
+	seen := map[string]bool{}
+	for rest := p; rest != ""; {
+		i := strings.IndexAny(rest, "{}")
+		if i < 0 {
+			break
+		}
+		if rest[i] == '}' {
+			return fmt.Errorf("branch pattern %q: stray '}'", p)
+		}
+		matched := ""
+		for _, ph := range []string{placeholderType, placeholderN, placeholderSlug} {
+			if strings.HasPrefix(rest[i:], ph) {
+				matched = ph
+				break
+			}
+		}
+		if matched == "" {
+			return fmt.Errorf("branch pattern %q: unknown placeholder or stray '{'", p)
+		}
+		seen[matched] = true
+		rest = rest[i+len(matched):]
+	}
+	for _, ph := range []string{placeholderN, placeholderSlug} {
+		if !seen[ph] {
+			return fmt.Errorf("branch pattern %q: missing %s", p, ph)
+		}
+	}
+	return nil
+}
+
+// expandBranchPattern replaces every occurrence of each placeholder of a
+// validated pattern literally (Task 10c agentDefault 5). The result still
+// has to pass refFormatOK.
+func expandBranchPattern(p, typ, n, slug string) string {
+	return strings.NewReplacer(placeholderType, typ, placeholderN, n, placeholderSlug, slug).Replace(p)
+}
+
+// validateIdentity applies git.CommitTree's identity rule early: Name and
+// Email non-empty, with no `<`, `>`, newline or NUL (Task 10c agentDefault
+// 5).
+func validateIdentity(id git.Identity) error {
+	for _, f := range []struct{ name, v string }{{"name", id.Name}, {"email", id.Email}} {
+		if f.v == "" {
+			return fmt.Errorf("empty identity %s", f.name)
+		}
+		if strings.ContainsAny(f.v, "<>\n\x00") {
+			return fmt.Errorf("identity %s %q holds '<', '>', a newline or NUL", f.name, f.v)
+		}
+	}
+	return nil
 }
 
 func (c Config) validate() error {
@@ -110,6 +191,12 @@ func (c Config) validate() error {
 		if e == "" {
 			return fmt.Errorf("config: egress entry %d is empty", i)
 		}
+	}
+	if err := validateBranchPattern(c.BranchPattern); err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+	if err := validateIdentity(c.Identity); err != nil {
+		return fmt.Errorf("config: %w", err)
 	}
 	for _, d := range []struct{ name, path string }{{"clone dir", c.CloneDir}, {"run dir", c.RunDir}} {
 		if d.path == "" || !filepath.IsAbs(d.path) || filepath.Clean(d.path) != d.path {
