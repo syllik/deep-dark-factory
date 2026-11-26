@@ -113,6 +113,11 @@ type ReviewResult struct {
 	Findings  []model.Finding
 	RaiseRisk model.RiskClass // empty, standard or sensitive; honoured from R1
 	Checklist []ChecklistItem
+	// Prior is the findings of the prior review of the same role; HasPrior
+	// is false for the first review of that role (or R2 added later), and
+	// then no finding may carry a PriorID.
+	Prior    []model.Finding
+	HasPrior bool
 }
 
 // reviewSummary is what routing needs from one valid result.
@@ -120,6 +125,7 @@ type reviewSummary struct {
 	blocking   int
 	hardStop   bool // a hard-stop finding or a checklist hit
 	unassessed bool
+	loop       string // a blocking finding continuing a blocking prior finding
 }
 
 func summarize(r ReviewResult, head string) (reviewSummary, error) {
@@ -137,6 +143,10 @@ func summarize(r ReviewResult, head string) (reviewSummary, error) {
 	default:
 		return sum, fmt.Errorf("%w: %s: raiseRisk %q", ErrInvalidInput, r.Role, r.RaiseRisk)
 	}
+	prior, err := priorBlocking(r)
+	if err != nil {
+		return sum, err
+	}
 	for i, f := range r.Findings {
 		b, err := policy.IsBlocking(f)
 		if err != nil {
@@ -144,6 +154,9 @@ func summarize(r ReviewResult, head string) (reviewSummary, error) {
 		}
 		if b {
 			sum.blocking++
+			if f.PriorID != "" && prior[f.PriorID] && sum.loop == "" {
+				sum.loop = fmt.Sprintf("%s finding %s continues blocking prior finding %s", r.Role, f.ID, f.PriorID)
+			}
 		}
 		if f.Category == model.FindingCategoryHardStop {
 			sum.hardStop = true
@@ -171,9 +184,13 @@ func summarize(r ReviewResult, head string) (reviewSummary, error) {
 // task in review. Exactly one result per required role, all for head, is
 // expected; anything else is ErrInvalidInput. A reviewer with
 // HardStopChecklist must send a non-empty checklist, else ErrInvalidInput;
-// another reviewer may send one and its items count the same. In order: an
+// another reviewer may send one and its items count the same. Finding
+// identity is checked per result (see priorBlocking); a violation wraps both
+// ErrInvalidInput and model.ErrInvalidResult. In order: an
 // unassessed checklist item reruns that reviewer; a hard-stop finding or
-// checklist hit raises needs-owner with hit_stop; a blocking finding goes to
+// checklist hit raises needs-owner with hit_stop; a blocking finding whose
+// PriorID names a finding that was blocking in that reviewer's Prior raises
+// needs-owner (loop guard, without hit_stop); a blocking finding goes to
 // fixing; an R1 raiseRisk without R2 in the set adds R2; else every result
 // approves and the task goes to merge.
 func RouteReview(s Status, head string, required []policy.Reviewer, results []ReviewResult) (Outcome, error) {
@@ -224,8 +241,11 @@ func RouteReview(s Status, head string, required []policy.Reviewer, results []Re
 	}
 
 	var rerun []model.Role
-	hardStop, blocking := false, false
+	hardStop, blocking, loop := false, false, ""
 	for i, sum := range sums {
+		if loop == "" {
+			loop = sum.loop
+		}
 		if sum.unassessed {
 			rerun = append(rerun, roles[i])
 		}
@@ -239,6 +259,8 @@ func RouteReview(s Status, head string, required []policy.Reviewer, results []Re
 		o := ownerOutcome(s, "hard stop found in review")
 		o.SetHitStop = true
 		return o, nil
+	case loop != "":
+		return ownerOutcome(s, "fix loop: "+loop), nil
 	case blocking:
 		return Outcome{State: model.TaskStateFixing}, nil
 	}
