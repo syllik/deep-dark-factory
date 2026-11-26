@@ -4,54 +4,208 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/syllik/deep-dark-factory/internal/adapters/forge/local"
+	"github.com/syllik/deep-dark-factory/internal/adapters/sandbox/fake"
 	"github.com/syllik/deep-dark-factory/internal/core/model"
 	"github.com/syllik/deep-dark-factory/internal/core/ports"
+	"github.com/syllik/deep-dark-factory/internal/core/workspace/git"
 	"github.com/syllik/deep-dark-factory/test/fakes"
 )
 
-const projectID = "demo"
+const (
+	projectID         = "demo"
+	integrationBranch = "main"
+)
 
 var testStart = time.Date(2026, 11, 25, 10, 0, 0, 0, time.UTC)
 
-// env is one test project: a data dir, a bare remote, a fixed clock and a
-// captured logger.
+// env is one test project: a data dir, a real bare remote seeded through a
+// work repository, the clean clone and run dirs, a fake sandbox host, a
+// fixed clock and a captured logger.
 type env struct {
 	dataDir string
 	remote  string
+	work    string
+	git     *git.Runner
+	host    *fake.Host
+	sandbox *fake.Sandbox
 	clock   *fakes.Clock
 	logs    *bytes.Buffer
+	// mainSHA is the seed commit on the integration branch.
+	mainSHA string
 	cfg     local.Config
 }
 
+// seedRepos is built once per test binary by TestMain: a git.Runner on the
+// host git and a bare remote seeded with one commit on the integration
+// branch through a work repository. newEnv copies both.
+var seedRepos struct {
+	bare, work, mainSHA string
+	git                 *git.Runner
+}
+
+func TestMain(m *testing.M) {
+	code, err := runWithSeed(m)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "forge-local test seed:", err)
+		os.Exit(1)
+	}
+	os.Exit(code)
+}
+
+// runWithSeed builds seedRepos in a temp dir, runs the tests and removes
+// the dir. Git missing is an error: tests fail, never skip.
+func runWithSeed(m *testing.M) (int, error) {
+	dir, err := os.MkdirTemp("", "forge-local-seed-")
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = os.RemoveAll(dir) }() // best effort cleanup of the seed
+	p, err := exec.LookPath("git")
+	if err == nil {
+		p, err = filepath.Abs(p)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("git not found: %w", err)
+	}
+	ctx := context.Background()
+	r, err := git.NewRunner(ctx, p, filepath.Join(dir, "git-state"))
+	if err != nil {
+		return 0, err
+	}
+	bare, work := filepath.Join(dir, "remote.git"), filepath.Join(dir, "work")
+	if err := os.MkdirAll(work, 0o700); err != nil {
+		return 0, err
+	}
+	if err := os.WriteFile(filepath.Join(work, "README"), []byte("base\n"), 0o644); err != nil {
+		return 0, err
+	}
+	steps := []struct {
+		dir  string
+		args []string
+	}{
+		{dir, []string{"init", "-q", "--bare", "--initial-branch=" + integrationBranch, bare}},
+		{dir, []string{"init", "-q", "--initial-branch=" + integrationBranch, work}},
+		{work, []string{"remote", "add", "origin", fileURL(bare)}},
+		{work, []string{"add", "--", "README"}},
+		{work, []string{"-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "seed"}},
+		{work, []string{"push", "-q", "origin", "refs/heads/" + integrationBranch + ":refs/heads/" + integrationBranch}},
+	}
+	for _, st := range steps {
+		if _, err := r.Run(ctx, st.dir, nil, st.args...); err != nil {
+			return 0, fmt.Errorf("git %v: %w", st.args, err)
+		}
+	}
+	out, err := r.Run(ctx, work, nil, "rev-parse", "HEAD")
+	if err != nil {
+		return 0, err
+	}
+	seedRepos.bare, seedRepos.work, seedRepos.git = bare, work, r
+	seedRepos.mainSHA = strings.TrimSpace(string(out))
+	return m.Run(), nil
+}
+
+// newEnv copies the seed repositories into fresh temp dirs and configures
+// a project on them, with the clean clone and run dirs under another temp
+// dir and Sandbox an instance of a fresh fake host.
 func newEnv(t *testing.T) *env {
 	t.Helper()
+	if seedRepos.git == nil {
+		t.Fatal("seed repositories missing: TestMain did not run")
+	}
 	dataDir := t.TempDir()
-	bare := filepath.Join(t.TempDir(), "remote.git")
-	makeBare(t, bare)
-	e := &env{dataDir: dataDir, remote: bare, clock: fakes.NewClock(testStart), logs: &bytes.Buffer{}}
+	repos := t.TempDir()
+	bare := filepath.Join(repos, "remote.git")
+	work := filepath.Join(repos, "work")
+	for _, c := range [][2]string{{seedRepos.bare, bare}, {seedRepos.work, work}} {
+		if err := os.CopyFS(c[1], os.DirFS(c[0])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := seedRepos.git
+	gitOut(t, r, work, "remote", "set-url", "origin", fileURL(bare))
+	host := fake.NewHost(ports.Capacity{CPUMillis: 1 << 40, MemoryBytes: 1 << 50, DiskBytes: 1 << 50})
+	e := &env{
+		dataDir: dataDir, remote: bare, work: work, git: r, host: host, sandbox: host.Sandbox("a"),
+		clock: fakes.NewClock(testStart), logs: &bytes.Buffer{}, mainSHA: seedRepos.mainSHA,
+	}
+	daemon := t.TempDir()
 	e.cfg = local.Config{
-		ProjectID: projectID,
-		DataDir:   dataDir,
-		RemoteURL: fileURL(bare),
-		Clock:     e.clock,
-		IDs:       fakes.NewIDs("id"),
-		Logger:    slog.New(slog.NewTextHandler(e.logs, nil)),
+		ProjectID:         projectID,
+		DataDir:           dataDir,
+		RemoteURL:         fileURL(bare),
+		Clock:             e.clock,
+		IDs:               fakes.NewIDs("id"),
+		Logger:            slog.New(slog.NewTextHandler(e.logs, nil)),
+		IntegrationBranch: integrationBranch,
+		CloneDir:          filepath.Join(daemon, "clone.git"),
+		RunDir:            filepath.Join(daemon, "runs"),
+		Git:               r,
+		Sandbox:           e.sandbox,
+		Verify:            []string{"make verify"},
 	}
 	return e
 }
 
-// makeBare creates the filesystem shape of a bare repository at p.
+// gitOut runs git through r in dir with a test identity and returns the
+// trimmed stdout.
+func gitOut(t *testing.T, r *git.Runner, dir string, args ...string) string {
+	t.Helper()
+	full := append([]string{"-c", "user.name=test", "-c", "user.email=test@example.invalid"}, args...)
+	out, err := r.Run(context.Background(), dir, nil, full...)
+	if err != nil {
+		var ce *git.CommandError
+		errors.As(err, &ce)
+		t.Fatalf("git %v: %v %+v", args, err, ce)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// commitOn commits name with content on branch in the work repository
+// (creating the branch from the integration branch when missing), pushes
+// the branch to the bare remote and returns the commit SHA.
+func (e *env) commitOn(t *testing.T, branch, name, content string) string {
+	t.Helper()
+	if _, err := e.git.Run(context.Background(), e.work, nil, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
+		gitOut(t, e.git, e.work, "checkout", "-q", branch)
+	} else {
+		gitOut(t, e.git, e.work, "checkout", "-q", "-b", branch)
+	}
+	p := filepath.Join(e.work, name)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitOut(t, e.git, e.work, "add", "--", name)
+	gitOut(t, e.git, e.work, "commit", "-q", "-m", "add "+name)
+	sha := gitOut(t, e.git, e.work, "rev-parse", "HEAD")
+	gitOut(t, e.git, e.work, "push", "-q", "origin", "refs/heads/"+branch+":refs/heads/"+branch)
+	return sha
+}
+
+// remoteRefs lists every ref of the bare remote with its object name.
+func (e *env) remoteRefs(t *testing.T) string {
+	t.Helper()
+	return gitOut(t, e.git, e.remote, "for-each-ref", "--format=%(refname) %(objectname)")
+}
+
+// makeBare creates the filesystem shape of a bare repository at p. Only
+// tests where Open fails before cloning use it as the remote.
 func makeBare(t *testing.T, p string) {
 	t.Helper()
 	for _, d := range []string{p, filepath.Join(p, "objects"), filepath.Join(p, "refs")} {

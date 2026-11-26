@@ -145,3 +145,54 @@ func TestDecodeAnswerRecord(t *testing.T) {
 		})
 	}
 }
+
+// TestDecodeCheckAttempt_OnOpen checks that Open, which reads every check
+// attempt for recovery, refuses an invalid attempt record.
+func TestDecodeCheckAttempt_OnOpen(t *testing.T) {
+	marker := "ddf:task-key=" + string(testKey(t, "1"))
+	const other = "89abcdef0123456789abcdef0123456789abcdef"
+	for _, tc := range []struct {
+		name string
+		file string // relative to checks/<head>/
+		rec  func(head string) map[string]any
+		raw  func(b []byte) []byte
+		ok   bool
+	}{
+		{"valid", "1.json", func(h string) map[string]any { return attemptJSON(h, 1, "passed", "r1", marker) }, nil, true},
+		{"unknown field", "1.json", func(h string) map[string]any {
+			return with(attemptJSON(h, 1, "passed", "r1", marker), "extra", 1)
+		}, nil, false},
+		{"another schema", "1.json", func(h string) map[string]any {
+			return with(attemptJSON(h, 1, "passed", "r1", marker), "schema", "ddf.forge-local.check/v2")
+		}, nil, false},
+		{"trailing data", "1.json", func(h string) map[string]any { return attemptJSON(h, 1, "passed", "r1", marker) },
+			func(b []byte) []byte { return append(b, []byte(" {}")...) }, false},
+		{"invalid status", "1.json", func(h string) map[string]any { return attemptJSON(h, 1, "done", "r1", marker) }, nil, false},
+		{"head not matching directory", "1.json", func(string) map[string]any {
+			return attemptJSON(other, 1, "passed", "r1", marker)
+		}, nil, false},
+		{"attempt not matching file name", "2.json", func(h string) map[string]any {
+			return attemptJSON(h, 1, "passed", "r1", marker)
+		}, nil, false},
+		{"file name not a decimal", "01.json", func(h string) map[string]any {
+			return attemptJSON(h, 1, "passed", "r1", marker)
+		}, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.open(t)
+			b := mustJSON(t, tc.rec(e.mainSHA))
+			if tc.raw != nil {
+				b = tc.raw(b)
+			}
+			e.writeFile(t, "checks/"+e.mainSHA+"/"+tc.file, b)
+			_, err := local.Open(context.Background(), e.cfg)
+			if tc.ok && err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			if !tc.ok && err == nil {
+				t.Fatal("open succeeded, want a decode error")
+			}
+		})
+	}
+}
