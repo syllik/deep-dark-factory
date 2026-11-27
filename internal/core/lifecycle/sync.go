@@ -23,12 +23,18 @@ const (
 // configuration the worker identity may not write.
 const ReasonWorkflowFiles = "base changed workflow files; update the branch manually"
 
+// ActionDiscardSyncRun finishes the Executor sync run as discarded, so it
+// opens no sync batch.
+const ActionDiscardSyncRun Action = "discard-sync-run"
+
 // RouteSync routes a sync result. For a task in merge: up-to-date stays (the
 // gate is re-evaluated); merged goes to ci for the new head; conflict checks
 // the sync bound against runs and goes to fixing with ActionSyncBatch; a
 // workflow result is needs-owner with ReasonWorkflowFiles and consumes no
 // batch. For a task in publishing (push of an Executor sync batch) only the
-// workflow results are accepted.
+// workflow results are accepted: they are needs-owner with ReasonWorkflowFiles
+// and ActionDiscardSyncRun, so the existing sync run is finished as discarded
+// and consumes no batch.
 func RouteSync(s Status, r SyncResult, runs []model.Run, l Limits) (Outcome, error) {
 	if err := validate(s); err != nil {
 		return Outcome{}, err
@@ -52,7 +58,9 @@ func RouteSync(s Status, r SyncResult, runs []model.Run, l Limits) (Outcome, err
 	case model.TaskStatePublishing:
 		switch r {
 		case SyncResultWorkflowChanged, SyncResultForgeRefusedWorkflows:
-			return ownerOutcome(s, ReasonWorkflowFiles), nil
+			o := ownerOutcome(s, ReasonWorkflowFiles)
+			o.Action = ActionDiscardSyncRun
+			return o, nil
 		case SyncResultUpToDate, SyncResultMerged, SyncResultConflict:
 		}
 	case model.TaskStateInbox, model.TaskStatePlanning, model.TaskStateReady, model.TaskStateWaiting,

@@ -125,6 +125,11 @@ func TestIsolationPause(t *testing.T) {
 		{name: "intact, probe fails, re-apply fails: runtime", check: lifecycle.IsolationCheck{Rules: lifecycle.RulesIntact}, want: lifecycle.PauseRuntime, paused: true},
 		{name: "intact, probe fails, re-apply passes: no pause", check: lifecycle.IsolationCheck{Rules: lifecycle.RulesIntact, ReapplyPassed: true}},
 		{name: "unverifiable, re-apply fails: runtime", check: lifecycle.IsolationCheck{Rules: lifecycle.RulesUnverifiable, ProbesPassed: true}, want: lifecycle.PauseRuntime, paused: true},
+		{name: "restart failed, absent, no restart observed: security", check: lifecycle.IsolationCheck{RestartFailed: true, Rules: lifecycle.RulesAbsent, ReapplyPassed: true}, want: lifecycle.PauseSecurity, paused: true},
+		{name: "restart failed, changed, no restart observed: security", check: lifecycle.IsolationCheck{RestartFailed: true, Rules: lifecycle.RulesChanged, ProbesPassed: true, ReapplyPassed: true}, want: lifecycle.PauseSecurity, paused: true},
+		{name: "restart failed, unverifiable: runtime", check: lifecycle.IsolationCheck{RestartFailed: true, Rules: lifecycle.RulesUnverifiable, ReapplyPassed: true}, want: lifecycle.PauseRuntime, paused: true},
+		{name: "restart failed, absent after observed restart: runtime", check: lifecycle.IsolationCheck{RestartFailed: true, RestartObserved: true, Rules: lifecycle.RulesAbsent, ReapplyPassed: true}, want: lifecycle.PauseRuntime, paused: true},
+		{name: "restart failed, changed after observed restart: runtime", check: lifecycle.IsolationCheck{RestartFailed: true, RestartObserved: true, Rules: lifecycle.RulesChanged, ReapplyPassed: true}, want: lifecycle.PauseRuntime, paused: true},
 		{name: "restart observed, intact, re-apply fails: runtime", check: lifecycle.IsolationCheck{RestartObserved: true, Rules: lifecycle.RulesIntact, ProbesPassed: true}, want: lifecycle.PauseRuntime, paused: true},
 	}
 	for _, tt := range tests {
@@ -140,5 +145,8 @@ func TestIsolationPause(t *testing.T) {
 	}
 	if _, _, err := lifecycle.IsolationPause(lifecycle.IsolationCheck{Rules: "bogus"}); !errors.Is(err, lifecycle.ErrInvalidInput) {
 		t.Fatalf("invalid rule state error = %v, want ErrInvalidInput", err)
+	}
+	if _, _, err := lifecycle.IsolationPause(lifecycle.IsolationCheck{RestartFailed: true, Rules: "bogus"}); !errors.Is(err, lifecycle.ErrInvalidInput) {
+		t.Fatalf("invalid rule state with restart failed error = %v, want ErrInvalidInput", err)
 	}
 }
