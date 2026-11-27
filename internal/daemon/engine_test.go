@@ -1,7 +1,11 @@
 package daemon_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -22,6 +26,7 @@ import (
 	"github.com/syllik/deep-dark-factory/internal/core/lifecycle"
 	"github.com/syllik/deep-dark-factory/internal/core/model"
 	"github.com/syllik/deep-dark-factory/internal/core/policy"
+	"github.com/syllik/deep-dark-factory/internal/core/policy/signature"
 	"github.com/syllik/deep-dark-factory/internal/core/ports"
 	"github.com/syllik/deep-dark-factory/internal/core/publisher"
 	"github.com/syllik/deep-dark-factory/internal/core/store"
@@ -48,7 +53,29 @@ const (
 		`"agentDefaults":[{"question":"Which greeting?","choice":"hello"}]}`
 	executorComplete = `{"schema":"ddf.executor.result/v1","verdict":"COMPLETE","summary":"Added hello.txt.",` +
 		`"verify":{"commands":["make verify"],"passed":true}}`
+	reviewerApprove = `{"schema":"ddf.reviewer.result/v1","role":"r1","verdict":"APPROVE","findings":[],` +
+		`"hardStopChecklist":[{"item":"secrets","status":"clear"}]}`
+	reviewerRequestChanges = `{"schema":"ddf.reviewer.result/v1","role":"r1","verdict":"REQUEST_CHANGES",` +
+		`"findings":[{"id":"f1","severity":"P1","category":"correctness","evidence":"hello.txt lacks a trailing greeting."}],` +
+		`"hardStopChecklist":[{"item":"secrets","status":"clear"}]}`
 )
+
+// engSigner returns a review-signing key as the Secrets port holds it (PEM
+// PKCS#8 Ed25519 from 32 bytes of seed) and its signer.
+func engSigner(t *testing.T, seed byte) (ports.Secret, *signature.Signer) {
+	t.Helper()
+	priv := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{seed}, ed25519.SeedSize))
+	der, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := ports.NewSecret(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+	signer, err := signature.NewSigner(secret)
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	return secret, signer
+}
 
 // engGitPath is the host git; tests fail, never skip, without it.
 func engGitPath(t *testing.T) string {
@@ -305,6 +332,10 @@ type engEnv struct {
 	clock    *fakes.Clock
 	settings daemon.Settings
 	engine   *daemon.Engine
+	signer   *signature.Signer
+	verifier *signature.Verifier
+	// key is the task key tickUntil saw first; it outlives the candidate.
+	key model.TaskKey
 }
 
 // newEngEnv builds an engine in mode; adjust, when set, changes the
@@ -349,6 +380,11 @@ func newEngEnv(t *testing.T, mode ports.WriteMode, adjust func(*daemon.Settings,
 	}
 	rec := newRecorder()
 	agent := fakes.NewAgent(v)
+	_, signer := engSigner(t, 1)
+	verifier, err := signature.NewVerifier(signer.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	var project config.Project
 	project.IntegrationBranch = engBranch
@@ -361,6 +397,7 @@ func newEngEnv(t *testing.T, mode ports.WriteMode, adjust func(*daemon.Settings,
 		Project: project, Profile: policy.Profile{Autonomy: policy.AutonomyPropose, LowMaxLines: policy.DefaultLowMaxLines},
 		Routing: routing, AllowedActors: []string{local.LocalOperator.ID}, Limits: lifecycle.DefaultLimits(),
 		Mode: mode, Identity: engIdentity, CloneDir: cloneDir, ScratchDir: scratch, ChangeTemplate: engTemplate,
+		OperatorMax: policy.AutonomyMergeIntegration,
 	}
 	d := daemon.Deps{
 		Store: recStore{Store: st, rec: rec}, Forge: recForge{Forge: f, rec: rec}, Agent: agent,
@@ -373,7 +410,7 @@ func newEngEnv(t *testing.T, mode ports.WriteMode, adjust func(*daemon.Settings,
 			_, err := f.Ingest(ctx, mode)
 			return err
 		},
-		Validator: v, Logger: logger,
+		Validator: v, Signer: signer, Verifier: verifier, Logger: logger,
 	}
 	if adjust != nil {
 		adjust(&s, &d)
@@ -383,7 +420,7 @@ func newEngEnv(t *testing.T, mode ports.WriteMode, adjust func(*daemon.Settings,
 		t.Fatalf("New: %v", err)
 	}
 	return &engEnv{git: r, bare: bare, dataDir: dataDir, forge: f, store: st, rec: rec, agent: agent, clock: clock,
-		settings: s, engine: e}
+		settings: s, engine: e, signer: signer, verifier: verifier}
 }
 
 // addInbox writes one inbox task file.
@@ -419,8 +456,15 @@ func (e *engEnv) scriptHappyPath() {
 		Edits: []fakes.FileEdit{{Path: "hello.txt", Content: []byte("hello\n")}}})
 }
 
-// tickUntil ticks until the task of key is in want, at most n times, and
-// returns the task.
+// scriptToMerge is scriptHappyPath plus an approving r1 review.
+func (e *engEnv) scriptToMerge() {
+	e.scriptHappyPath()
+	e.agent.Script(model.RoleR1, fakes.AgentStep{Result: []byte(reviewerApprove)})
+}
+
+// tickUntil ticks until the task is in want, at most n times, and returns
+// the task. It remembers the key of the first candidate it sees, so it keeps
+// working once the forge task is closed and no candidate remains.
 func (e *engEnv) tickUntil(t *testing.T, n int, want model.TaskState) model.Task {
 	t.Helper()
 	var task model.Task
@@ -429,14 +473,19 @@ func (e *engEnv) tickUntil(t *testing.T, n int, want model.TaskState) model.Task
 			t.Fatalf("tick %d: %v", i+1, err)
 		}
 		cands, err := e.forge.ListCandidateTasks(t.Context())
-		if err != nil || len(cands) != 1 {
-			t.Fatalf("candidates: %v %v", cands, err)
-		}
-		key, err := model.NewTaskKey(cands[0].Source)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("candidates: %v", err)
 		}
-		task, err = e.store.GetTask(t.Context(), key)
+		switch {
+		case len(cands) == 1 && e.key == "":
+			if e.key, err = model.NewTaskKey(cands[0].Source); err != nil {
+				t.Fatal(err)
+			}
+		case len(cands) == 1 || (len(cands) == 0 && e.key != ""):
+		default:
+			t.Fatalf("candidates: %v", cands)
+		}
+		task, err = e.store.GetTask(t.Context(), e.key)
 		if errors.Is(err, store.ErrNotFound) {
 			continue
 		}
@@ -500,6 +549,14 @@ func TestTick_HappyPathToReview(t *testing.T) {
 	if got := engGit(t, e.git, e.bare, "show", tip+":hello.txt"); got != "hello" {
 		t.Errorf("pushed hello.txt = %q", got)
 	}
+	stored, err := e.store.ListChanges(t.Context(), task.Key)
+	if err != nil || len(stored) != 1 {
+		t.Fatalf("stored changes = %v, %v; want one", stored, err)
+	}
+	if c := stored[0]; c.ID != change.ID || c.Kind != model.ChangeKindChange || c.Branch != branch || c.BaseBranch != engBranch ||
+		c.HeadSHA != tip || c.Revision != 1 || !c.Open || c.PatchID == "" || c.CISince == nil || c.MergeSHA != "" {
+		t.Errorf("stored change = %+v, want revision 1 of %s open at %s", c, change.ID, tip)
+	}
 
 	wantEvents := []string{
 		"create push dryRun=false", "write push live", "resolve push succeeded",
@@ -554,6 +611,9 @@ func TestTick_DryRunNoForgeWrites(t *testing.T) {
 	}
 	if _, found, err := e.forge.FindChangeByTaskKey(t.Context(), task.Key); err != nil || found {
 		t.Errorf("FindChangeByTaskKey found=%v err=%v, want not found", found, err)
+	}
+	if stored, err := e.store.ListChanges(t.Context(), task.Key); err != nil || len(stored) != 0 {
+		t.Errorf("stored changes = %v, %v; want none in dry-run", stored, err)
 	}
 	if after := remoteHeads(t, e.git, e.bare); after != headsBefore {
 		t.Errorf("remote heads changed:\n%s\nwant\n%s", after, headsBefore)
@@ -656,12 +716,17 @@ func TestNew_RefusesInvalidInputs(t *testing.T) {
 		{"relative scratch dir", func(s *daemon.Settings, _ *daemon.Deps) { s.ScratchDir = "scratch" }},
 		{"empty integration branch", func(s *daemon.Settings, _ *daemon.Deps) { s.Project.IntegrationBranch = "" }},
 		{"zero planner timeout", func(s *daemon.Settings, _ *daemon.Deps) { s.Limits.PlannerTimeout = 0 }},
+		{"zero reviewer timeout", func(s *daemon.Settings, _ *daemon.Deps) { s.Limits.ReviewerTimeout = 0 }},
+		{"invalid operator max autonomy", func(s *daemon.Settings, _ *daemon.Deps) { s.OperatorMax = "everything" }},
+		{"empty operator max autonomy", func(s *daemon.Settings, _ *daemon.Deps) { s.OperatorMax = "" }},
 		{"invalid profile", func(s *daemon.Settings, _ *daemon.Deps) { s.Profile.Autonomy = "" }},
 		{"nil store", func(_ *daemon.Settings, d *daemon.Deps) { d.Store = nil }},
 		{"nil forge", func(_ *daemon.Settings, d *daemon.Deps) { d.Forge = nil }},
 		{"nil agent", func(_ *daemon.Settings, d *daemon.Deps) { d.Agent = nil }},
 		{"nil pusher", func(_ *daemon.Settings, d *daemon.Deps) { d.Pusher = nil }},
 		{"nil validator", func(_ *daemon.Settings, d *daemon.Deps) { d.Validator = nil }},
+		{"nil signer", func(_ *daemon.Settings, d *daemon.Deps) { d.Signer = nil }},
+		{"nil verifier", func(_ *daemon.Settings, d *daemon.Deps) { d.Verifier = nil }},
 		{"nil logger", func(_ *daemon.Settings, d *daemon.Deps) { d.Logger = nil }},
 	}
 	for _, c := range cases {
@@ -669,7 +734,7 @@ func TestNew_RefusesInvalidInputs(t *testing.T) {
 			s := e.settings
 			d := daemon.Deps{Store: e.store, Forge: e.forge, Agent: e.agent, Secrets: fakes.NewSecrets(nil), Clock: e.clock,
 				IDs: fakes.NewIDs("x"), Git: e.git, Publisher: &publisher.Publisher{}, Pusher: daemon.NewGitPusher(e.git, slog.Default()),
-				Validator: &model.ResultValidator{}, Logger: slog.Default()}
+				Validator: &model.ResultValidator{}, Signer: e.signer, Verifier: e.verifier, Logger: slog.Default()}
 			if _, err := daemon.New(s, d); err != nil {
 				t.Fatalf("baseline New: %v", err)
 			}

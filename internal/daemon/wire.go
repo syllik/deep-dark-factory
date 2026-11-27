@@ -10,11 +10,16 @@ import (
 	"github.com/syllik/deep-dark-factory/internal/core/config"
 	"github.com/syllik/deep-dark-factory/internal/core/lifecycle"
 	"github.com/syllik/deep-dark-factory/internal/core/model"
+	"github.com/syllik/deep-dark-factory/internal/core/policy/signature"
 	"github.com/syllik/deep-dark-factory/internal/core/ports"
 	"github.com/syllik/deep-dark-factory/internal/core/publisher"
 	"github.com/syllik/deep-dark-factory/internal/core/store"
 	"github.com/syllik/deep-dark-factory/internal/core/workspace/git"
 )
+
+// reviewSigningKeySecret is the Secrets port name of the daemon's
+// review-signing key (Task 12a agentDefault, Issue #144).
+const reviewSigningKeySecret = "review-signing-key"
 
 // defaultChangeTemplate is the change body template used when the project
 // sets no change.template (Task 12a agentDefault). It holds exactly the
@@ -123,6 +128,11 @@ func Open(ctx context.Context, cfg Config, p Ports) (_ *Daemon, err error) {
 	limits := lifecycle.DefaultLimits()
 	limits.MaxRunsPerTask = projects.Limits.MaxRunsPerTask
 
+	signer, verifier, err := reviewKeys(ctx, p.Secrets)
+	if err != nil {
+		return nil, fmt.Errorf("open daemon: review-signing key: %w", err)
+	}
+
 	runner, err := git.NewRunner(ctx, cfg.GitPath, cfg.GitStateDir)
 	if err != nil {
 		return nil, fmt.Errorf("open daemon: git runner: %w", err)
@@ -201,6 +211,7 @@ func Open(ctx context.Context, cfg Config, p Ports) (_ *Daemon, err error) {
 		CloneDir:       cfg.CloneDir,
 		ScratchDir:     cfg.ScratchDir,
 		ChangeTemplate: template,
+		OperatorMax:    cp.MaxAutonomy,
 	}, Deps{
 		Store:     st,
 		Forge:     forge,
@@ -214,6 +225,8 @@ func Open(ctx context.Context, cfg Config, p Ports) (_ *Daemon, err error) {
 		Checks:    forge,
 		Ingest:    ingest,
 		Validator: validator,
+		Signer:    signer,
+		Verifier:  verifier,
 		Logger:    logger,
 	})
 	if err != nil {
@@ -252,6 +265,25 @@ func (p Ports) check() error {
 		return errors.New("nil logger")
 	}
 	return nil
+}
+
+// reviewKeys reads the review-signing key from the Secrets port and returns
+// its signer and a verifier that trusts only its public key. Errors never
+// contain the key.
+func reviewKeys(ctx context.Context, secrets ports.Secrets) (*signature.Signer, *signature.Verifier, error) {
+	secret, err := secrets.Read(ctx, reviewSigningKeySecret)
+	if err != nil {
+		return nil, nil, err
+	}
+	signer, err := signature.NewSigner(secret)
+	if err != nil {
+		return nil, nil, err
+	}
+	verifier, err := signature.NewVerifier(signer.Public())
+	if err != nil {
+		return nil, nil, err
+	}
+	return signer, verifier, nil
 }
 
 // connectedProject returns the projects.yaml entry with id. A missing id is
