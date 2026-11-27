@@ -11,8 +11,10 @@ import (
 	"github.com/syllik/deep-dark-factory/internal/core/lifecycle"
 	"github.com/syllik/deep-dark-factory/internal/core/model"
 	"github.com/syllik/deep-dark-factory/internal/core/policy"
+	"github.com/syllik/deep-dark-factory/internal/core/policy/signature"
 	"github.com/syllik/deep-dark-factory/internal/core/ports"
 	"github.com/syllik/deep-dark-factory/internal/core/publisher"
+	"github.com/syllik/deep-dark-factory/internal/core/store"
 	"github.com/syllik/deep-dark-factory/internal/core/workspace/git"
 )
 
@@ -23,6 +25,16 @@ type Store interface {
 	CreateTask(ctx context.Context, t model.Task, ev model.Event) error
 	UpdateTask(ctx context.Context, t model.Task, ev model.Event) error
 	GetTask(ctx context.Context, key model.TaskKey) (model.Task, error)
+	CreateRun(ctx context.Context, r model.Run) error
+	FinishRun(ctx context.Context, r model.Run) error
+	ListRuns(ctx context.Context, key model.TaskKey) ([]model.Run, error)
+	CreateChange(ctx context.Context, c model.Change) error
+	UpdateChange(ctx context.Context, c model.Change) error
+	ListChanges(ctx context.Context, key model.TaskKey) ([]model.Change, error)
+	NextReviewRound(ctx context.Context, key model.TaskKey, changeID string, role model.Role) (int, error)
+	CreateReview(ctx context.Context, r model.Review, findings []model.Finding) error
+	ListReviews(ctx context.Context, key model.TaskKey, changeID string) ([]model.Review, error)
+	ListBaseMerges(ctx context.Context, key model.TaskKey, changeID string) ([]store.BaseMerge, error)
 }
 
 // CheckRunner runs the pending checks of a forge that checks locally;
@@ -43,10 +55,14 @@ type Settings struct {
 	CloneDir       string
 	ScratchDir     string
 	ChangeTemplate string
+	// OperatorMax is the operator's maxAutonomy of the connected project;
+	// the merge gate never goes beyond it.
+	OperatorMax policy.Autonomy
 }
 
 // Deps are the engine's ports and collaborators. Checks and Ingest may be
-// nil.
+// nil. Signer signs the stored reviews; Verifier is the only key set the
+// merge gate trusts.
 type Deps struct {
 	Store     Store
 	Forge     ports.Forge
@@ -60,6 +76,8 @@ type Deps struct {
 	Checks    CheckRunner
 	Ingest    func(ctx context.Context, mode ports.WriteMode) error
 	Validator *model.ResultValidator
+	Signer    *signature.Signer
+	Verifier  *signature.Verifier
 	Logger    *slog.Logger
 }
 
@@ -107,6 +125,8 @@ func (d Deps) validate() error {
 		{"publisher", d.Publisher == nil},
 		{"pusher", d.Pusher == nil},
 		{"result validator", d.Validator == nil},
+		{"review signer", d.Signer == nil},
+		{"review verifier", d.Verifier == nil},
 		{"logger", d.Logger == nil},
 	}
 	var errs []error
@@ -127,8 +147,12 @@ func (s Settings) validate() error {
 	if s.Project.IntegrationBranch == "" {
 		return errors.New("empty integration branch")
 	}
-	if s.Limits.PlannerTimeout <= 0 || s.Limits.ExecutorTimeout <= 0 {
-		return fmt.Errorf("planner timeout %s and executor timeout %s must be positive", s.Limits.PlannerTimeout, s.Limits.ExecutorTimeout)
+	if s.Limits.PlannerTimeout <= 0 || s.Limits.ExecutorTimeout <= 0 || s.Limits.ReviewerTimeout <= 0 {
+		return fmt.Errorf("planner timeout %s, executor timeout %s and reviewer timeout %s must be positive",
+			s.Limits.PlannerTimeout, s.Limits.ExecutorTimeout, s.Limits.ReviewerTimeout)
+	}
+	if _, err := policy.ParseAutonomy(string(s.OperatorMax)); err != nil {
+		return fmt.Errorf("operator max autonomy: %w", err)
 	}
 	if err := s.Profile.Validate(); err != nil {
 		return err
