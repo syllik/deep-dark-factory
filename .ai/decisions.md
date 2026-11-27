@@ -616,3 +616,9 @@ Source: Issue #97; #43 answer 6; plan Task 15.
 - 2026-11-26 AGENT-DEFAULT: Are reviews and base merges listed by task key alone, as the Issue says? → By task key and change ID, because the gate evaluates one change and a task can also have a revert change. Runs and changes are listed by task key. Task: #143.
 - 2026-11-26 AGENT-DEFAULT: Is an empty Change.PatchID allowed, given that changes.patch_id is NOT NULL? → No. CreateChange and UpdateChange refuse an empty PatchID, HeadSHA, Branch or BaseBranch, since the gate's rule 4 needs the patch-id. Task: #143.
 - 2026-11-26 AGENT-DEFAULT: Are the executor groups parallel? → Group A (runs) and group B (changes, base merges) run in parallel. Group C (reviews, findings, decisions.md) starts after both, because CreateReview checks the change and run and its tests use newRun and newChange. Task: #143.
+
+## 2026-11-27 Orchestrator session tier (Issue #150)
+
+Source: Issue #150, owner decision in the session chat on 2026-11-27 (ai-workflow side: syllik/ai-workflow#98).
+
+- 2026-11-27 The interactive orchestrator session (manual or supervisor mode) runs at `standard`, never `deep`, `routine` or `fast`; `frontier` stays never selected. A rotation successor that continues orchestration runs at `standard` too. Reason: `routine` orchestrators often failed to carry approved plans, and without a named tier rotation successors took the cheaper tier. Supersedes the 2026-11-11 AGENT-DEFAULT (#57) that the rotation rules do not name a tier. Daemon routing is unchanged. Task: #150.
