@@ -1,0 +1,9 @@
+# Routing for the end-to-end tests (placeholder values).
+tiers:
+  deep: [{adapter: example-cli, provider: example-provider, model: example-model, effort: high}]
+  standard: [{adapter: example-cli, provider: example-provider, model: example-model, effort: medium}]
+  routine: [{adapter: example-cli, provider: example-provider, model: example-model, effort: low}]
+  fast: [{adapter: example-cli, provider: example-provider, model: example-model}]
+limits:
+  maxConcurrentContainers: 1
+  maxSubagentsPerRun: 1

@@ -1,0 +1,11 @@
+# Connected projects for the end-to-end tests (placeholder values).
+# REMOTE_URL is replaced with the file: URL of a bare repository in
+# t.TempDir(), MAX_AUTONOMY with the operator maximum of each test.
+projects:
+  - id: demo
+    forge: local
+    remote: REMOTE_URL
+    maxAutonomy: MAX_AUTONOMY
+    allowedActors: [local-operator]
+limits:
+  maxRunsPerTask: 12
