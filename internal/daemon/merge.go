@@ -76,7 +76,7 @@ func (e *Engine) merge(ctx context.Context, it tickTask) error {
 		_, err := e.apply(ctx, t, o, nil)
 		return err
 	case lifecycle.ActionCreateChildren, lifecycle.ActionRerunReviewer, lifecycle.ActionAddReviewer, lifecycle.ActionLeave,
-		lifecycle.ActionRetry, lifecycle.ActionSyncBatch, lifecycle.ActionRerunCI, lifecycle.ActionOpenRevert, lifecycle.ActionPause:
+		lifecycle.ActionRetry, lifecycle.ActionSyncBatch, lifecycle.ActionRerunCI, lifecycle.ActionOpenRevert, lifecycle.ActionPause, lifecycle.ActionDiscardSyncRun:
 		return fmt.Errorf("route merge refusals: unexpected action %q", o.Action)
 	default:
 		return fmt.Errorf("route merge refusals: unknown action %q", o.Action)

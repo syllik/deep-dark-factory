@@ -62,7 +62,7 @@ func TestRouteSyncWorkflowConsumesNoBatch(t *testing.T) {
 func TestRouteSyncPublishing(t *testing.T) {
 	l := DefaultLimits()
 	s := Status{State: model.TaskStatePublishing}
-	want := Outcome{State: model.TaskStatePublishing, Flag: model.TaskFlagNeedsOwner, Reason: ReasonWorkflowFiles}
+	want := Outcome{State: model.TaskStatePublishing, Flag: model.TaskFlagNeedsOwner, Action: ActionDiscardSyncRun, Reason: ReasonWorkflowFiles}
 	for _, r := range []SyncResult{SyncResultWorkflowChanged, SyncResultForgeRefusedWorkflows} {
 		got, err := RouteSync(s, r, nil, l)
 		if err != nil || !reflect.DeepEqual(got, want) {
@@ -73,6 +73,27 @@ func TestRouteSyncPublishing(t *testing.T) {
 		if _, err := RouteSync(s, r, nil, l); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("%s: err = %v, want ErrInvalidInput", r, err)
 		}
+	}
+}
+
+// TestRouteSyncDiscardedSyncRunConsumesNoBatch shows the sync run discarded
+// after a publishing-state workflow stop opens no sync batch: with one
+// counted batch left, a later conflict still gets it.
+func TestRouteSyncDiscardedSyncRunConsumesNoBatch(t *testing.T) {
+	discarded := boundsRun(model.RunPurposeSync, 1, model.RunStatusDiscarded)
+	c, err := CountRuns([]model.Run{discarded})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.SyncBatches != 0 {
+		t.Errorf("SyncBatches = %d, want 0", c.SyncBatches)
+	}
+	l := DefaultLimits()
+	l.SyncBatches = 2
+	runs := append(boundsRuns(1, model.RunPurposeSync), discarded)
+	o, err := RouteSync(Status{State: model.TaskStateMerge}, SyncResultConflict, runs, l)
+	if err != nil || o.Action != ActionSyncBatch {
+		t.Errorf("conflict after discarded sync run = %+v, %v, want ActionSyncBatch", o, err)
 	}
 }
 

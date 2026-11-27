@@ -113,11 +113,21 @@ type IsolationCheck struct {
 }
 
 // IsolationPause maps an isolation check to the pause reason it sets, if
-// any (spec §8.4 precedence): a failed runtime restart is runtime; rules
-// absent or changed with no observed restart are security, even when a
-// re-apply would succeed; after an observed restart, a probe failure or an
-// unverifiable check, a failed re-apply is runtime.
+// any. The order follows spec §8.4 precedence, tamper rule first: an unknown
+// rule state is ErrInvalidInput; rules absent or changed with no observed
+// restart are security, even when the runtime restart failed or a re-apply
+// would succeed; otherwise a failed runtime restart is runtime; after an
+// observed restart, a probe failure or an unverifiable check, a failed
+// re-apply is runtime.
 func IsolationPause(c IsolationCheck) (PauseReason, bool, error) {
+	switch c.Rules {
+	case RulesIntact, RulesAbsent, RulesChanged, RulesUnverifiable:
+	default:
+		return "", false, fmt.Errorf("%w: rule state %q", ErrInvalidInput, c.Rules)
+	}
+	if (c.Rules == RulesAbsent || c.Rules == RulesChanged) && !c.RestartObserved {
+		return PauseSecurity, true, nil
+	}
 	if c.RestartFailed {
 		return PauseRuntime, true, nil
 	}
@@ -125,14 +135,9 @@ func IsolationPause(c IsolationCheck) (PauseReason, bool, error) {
 	switch c.Rules {
 	case RulesIntact:
 		reapply = reapply || !c.ProbesPassed
-	case RulesAbsent, RulesChanged:
-		if !c.RestartObserved {
-			return PauseSecurity, true, nil
-		}
 	case RulesUnverifiable:
 		reapply = true
-	default:
-		return "", false, fmt.Errorf("%w: rule state %q", ErrInvalidInput, c.Rules)
+	case RulesAbsent, RulesChanged:
 	}
 	if reapply && !c.ReapplyPassed {
 		return PauseRuntime, true, nil

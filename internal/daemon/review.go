@@ -164,7 +164,7 @@ func (e *Engine) review(ctx context.Context, it tickTask) error {
 		return err
 	case lifecycle.ActionBackoff, lifecycle.ActionNotify, lifecycle.ActionSync, lifecycle.ActionCreateChildren,
 		lifecycle.ActionMerge, lifecycle.ActionLeave, lifecycle.ActionRetry, lifecycle.ActionSyncBatch, lifecycle.ActionRerunCI,
-		lifecycle.ActionOpenRevert, lifecycle.ActionPause:
+		lifecycle.ActionOpenRevert, lifecycle.ActionPause, lifecycle.ActionDiscardSyncRun:
 		return fmt.Errorf("route review: unexpected action %q", o.Action)
 	}
 	return fmt.Errorf("route review: unknown action %q", o.Action)
