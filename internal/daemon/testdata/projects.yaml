@@ -1,0 +1,15 @@
+# Connected projects for the wiring tests; REMOTE_URL is replaced by the
+# test with the file: URL of a bare repository in t.TempDir().
+projects:
+  - id: demo
+    forge: local
+    remote: REMOTE_URL
+    maxAutonomy: propose
+    allowedActors: [local-operator]
+  - id: example-app
+    forge: github
+    repository: example-org/example-app
+    maxAutonomy: propose
+    allowedActors: [example-maintainer]
+limits:
+  maxRunsPerTask: 12

@@ -1,0 +1,4 @@
+# Invalid: verify is required and autonomy has an unknown value.
+version: ddf.project/v1
+integrationBranch: main
+autonomy: everything
