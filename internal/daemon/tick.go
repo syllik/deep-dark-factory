@@ -23,6 +23,7 @@ const (
 	eventIntake     = "intake"
 	eventTransition = "transition"
 	eventFlag       = "flag"
+	eventRisk       = "risk"
 )
 
 // changeBranchPrefix names the change branch until change.branch pattern
@@ -192,8 +193,14 @@ func (e *Engine) step(ctx context.Context, it tickTask, dec scheduler.Decision) 
 		// Task 12b.
 		e.deps.Logger.Debug("task in publishing left alone", "key", string(t.Key))
 		return nil
-	case model.TaskStateReview, model.TaskStateFixing, model.TaskStateMerge, model.TaskStateDone:
-		// The review and merge stage is a later task.
+	case model.TaskStateReview:
+		return e.review(ctx, it)
+	case model.TaskStateMerge:
+		return e.merge(ctx, it)
+	case model.TaskStateFixing:
+		// Correction batches are Task 12b.
+		return nil
+	case model.TaskStateDone:
 		return nil
 	}
 	return fmt.Errorf("step: unknown state %q", t.State)
@@ -242,6 +249,25 @@ func (e *Engine) apply(ctx context.Context, t model.Task, o lifecycle.Outcome, r
 	return next, nil
 }
 
+// applyRisk stores risk as the task's risk class with one UpdateTask and a
+// risk event. It returns the stored task.
+func (e *Engine) applyRisk(ctx context.Context, t model.Task, risk model.RiskClass, run *runInfo) (model.Task, error) {
+	now := e.deps.Clock.Now()
+	next := t
+	next.Risk = risk
+	next.UpdatedAt = now
+	ev := model.Event{Key: t.Key, Type: eventRisk, At: now}
+	if run != nil {
+		ev.Role = run.role
+		ev.Model = run.usage.ModelID
+		ev.Usage = &model.Usage{InputTokens: run.usage.InputTokens, OutputTokens: run.usage.OutputTokens}
+	}
+	if err := e.deps.Store.UpdateTask(ctx, next, ev); err != nil {
+		return model.Task{}, fmt.Errorf("apply risk: %w", err)
+	}
+	return next, nil
+}
+
 // brief is the run brief of a task: its title, body, spec and acceptance.
 func brief(it tickTask) ([]byte, error) {
 	b, err := json.Marshal(struct {
@@ -264,7 +290,7 @@ func (e *Engine) plan(ctx context.Context, it tickTask) error {
 	if err != nil {
 		return err
 	}
-	res, owner, err := e.runAgent(ctx, t, status, model.RolePlanner, model.RunPurposePlanning, br, nil)
+	res, _, owner, err := e.runAgent(ctx, t, status, runSpec{Role: model.RolePlanner, Purpose: model.RunPurposePlanning, Brief: br})
 	if err != nil {
 		return err
 	}
@@ -337,6 +363,17 @@ func (e *Engine) admit(ctx context.Context, t model.Task, dec scheduler.Decision
 	return err
 }
 
+// integrationTip returns the commit at the integration branch tip of the
+// clean clone.
+func (e *Engine) integrationTip(ctx context.Context) (string, error) {
+	branch := e.settings.Project.IntegrationBranch
+	out, err := e.deps.Git.Run(ctx, e.settings.CloneDir, nil, "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("read integration branch tip: %w", err)
+	}
+	return string(bytes.TrimSpace(out)), nil
+}
+
 // execute runs the Executor on a task in running and publishes its patch
 // in the same step, so the patch is never stored.
 func (e *Engine) execute(ctx context.Context, it tickTask) (err error) {
@@ -346,12 +383,10 @@ func (e *Engine) execute(ctx context.Context, it tickTask) (err error) {
 	if err := g.Fetch(ctx, clone); err != nil {
 		return err
 	}
-	branch := e.settings.Project.IntegrationBranch
-	out, err := g.Run(ctx, clone, nil, "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}")
+	base, err := e.integrationTip(ctx)
 	if err != nil {
-		return fmt.Errorf("read integration branch tip: %w", err)
+		return err
 	}
-	base := string(bytes.TrimSpace(out))
 	copyID := e.deps.IDs.NewID()
 	dir := filepath.Join(e.settings.ScratchDir, "run-"+copyID)
 	if err := g.NewRunCopy(ctx, clone, base, dir); err != nil {
@@ -367,7 +402,9 @@ func (e *Engine) execute(ctx context.Context, it tickTask) (err error) {
 		return err
 	}
 	status := statusOf(t)
-	res, owner, err := e.runAgent(ctx, t, status, model.RoleExecutor, model.RunPurposeInitial, br, os.DirFS(dir))
+	res, _, owner, err := e.runAgent(ctx, t, status, runSpec{
+		Role: model.RoleExecutor, Purpose: model.RunPurposeInitial, Brief: br, Workspace: os.DirFS(dir),
+	})
 	if err != nil {
 		return err
 	}
@@ -399,9 +436,10 @@ func (e *Engine) publish(ctx context.Context, t model.Task, runID, base string, 
 	if len(key) < 12 {
 		return fmt.Errorf("publish: task key %q too short", key)
 	}
+	branch := changeBranchPrefix + key[:12]
 	out, err := e.deps.Publisher.Prepare(ctx, publisher.Input{
 		Key: t.Key, RunID: runID, TaskRef: t.SourceID, Title: t.Title,
-		Branch: changeBranchPrefix + key[:12], BaseBranch: s.Project.IntegrationBranch, BranchHead: "",
+		Branch: branch, BaseBranch: s.Project.IntegrationBranch, BranchHead: "",
 		Base: base, ChangedFrom: base, Patch: patch, Profile: s.Profile, PlannerRisk: t.PlannerRisk,
 		Template: s.ChangeTemplate, Verify: s.Project.Verify, Registries: s.Project.Registries,
 		AgentNotes: notes, Identity: s.Identity,
@@ -419,6 +457,11 @@ func (e *Engine) publish(ctx context.Context, t model.Task, runID, base string, 
 			return err
 		}
 		e.deps.Logger.Info("revision published", "key", key, "changeId", info.ID, "head", r.Commit, "mode", string(s.Mode))
+		if s.Mode == ports.WriteModeLive {
+			if err := e.recordChange(ctx, t, info.ID, branch, base, r.Commit); err != nil {
+				return err
+			}
+		}
 		if o, err = lifecycle.Advance(status); err != nil {
 			return err
 		}
@@ -434,6 +477,25 @@ func (e *Engine) publish(ctx context.Context, t model.Task, runID, base string, 
 	}
 	_, err = e.apply(ctx, t, o, nil)
 	return err
+}
+
+// recordChange stores the published change of t as revision 1, open, with
+// the patch-id of head against base and its CI wait starting now.
+func (e *Engine) recordChange(ctx context.Context, t model.Task, id, branch, base, head string) error {
+	pid, err := e.deps.Git.PatchID(ctx, e.settings.CloneDir, base, head)
+	if err != nil {
+		return fmt.Errorf("record change: %w", err)
+	}
+	now := e.deps.Clock.Now()
+	c := model.Change{
+		Key: t.Key, ID: id, Kind: model.ChangeKindChange, Branch: branch,
+		BaseBranch: e.settings.Project.IntegrationBranch, HeadSHA: head, Revision: 1, Open: true,
+		PatchID: pid, CISince: &now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := e.deps.Store.CreateChange(ctx, c); err != nil {
+		return fmt.Errorf("record change: %w", err)
+	}
+	return nil
 }
 
 // checkCI moves a task in ci to review once the checks of its change head

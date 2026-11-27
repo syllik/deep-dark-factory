@@ -1,8 +1,11 @@
 package daemon_test
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -82,7 +85,134 @@ func TestTick_RunTimeoutFromClock(t *testing.T) {
 					t.Errorf("agent limits timeout = %s, want %s", call.Limits.Timeout, e.settings.Limits.PlannerTimeout)
 				}
 			}
+			runs, err := e.store.ListRuns(t.Context(), task.Key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(runs) != c.wantCalls {
+				t.Fatalf("stored runs = %d, want %d", len(runs), c.wantCalls)
+			}
+			for i, r := range runs {
+				if r.Role != model.RolePlanner || r.Attempt != i+1 || r.FinishedAt == nil {
+					t.Errorf("run %d = %s attempt %d finished %v, want planner attempt %d finished", i, r.Role, r.Attempt, r.FinishedAt, i+1)
+				}
+				if c.wantFlags == nil {
+					if r.Status != model.RunStatusSucceeded {
+						t.Errorf("run %d status = %s, want succeeded", i, r.Status)
+					}
+					continue
+				}
+				if r.Status != model.RunStatusFailed || r.FailureClass != model.FailureClassFatal || r.Error != "run timeout" {
+					t.Errorf("run %d = %s %s %q, want failed fatal \"run timeout\"", i, r.Status, r.FailureClass, r.Error)
+				}
+			}
 		})
+	}
+}
+
+func TestTick_RunsPersisted(t *testing.T) {
+	e := newEngEnv(t, ports.WriteModeLive, nil)
+	e.addInbox(t)
+	e.scriptToMerge()
+	task := e.tickUntil(t, 15, model.TaskStateMerge)
+
+	runs, err := e.store.ListRuns(t.Context(), task.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fake clock does not move, so the store orders these runs by ID;
+	// they are matched by role.
+	byRole := map[model.Role]model.Run{}
+	for _, r := range runs {
+		byRole[r.Role] = r
+		if r.Attempt != 1 || r.Status != model.RunStatusSucceeded || r.Provider != "fakeprov" || r.FinishedAt == nil {
+			t.Errorf("run %s = attempt %d %s provider %q finished %v, want attempt 1 succeeded fakeprov finished",
+				r.Role, r.Attempt, r.Status, r.Provider, r.FinishedAt)
+		}
+		if r.Routing.Provider != "fakeprov" || r.Routing.Adapter != "fake" || r.Routing.Model != "fake-model" {
+			t.Errorf("run %s routing = %+v, want fake fakeprov fake-model", r.Role, r.Routing)
+		}
+		if r.ResultDigest == "" || r.FailureClass != "" || r.Error != "" {
+			t.Errorf("run %s = digest %q class %q error %q, want a digest and no failure", r.Role, r.ResultDigest, r.FailureClass, r.Error)
+		}
+	}
+	planner, executor, r1 := byRole[model.RolePlanner], byRole[model.RoleExecutor], byRole[model.RoleR1]
+	if len(runs) != 3 || planner.ID == "" || executor.ID == "" || r1.ID == "" {
+		t.Fatalf("stored runs = %+v, want exactly planner, executor and r1", runs)
+	}
+	if u := planner.Usage; u == nil || u.InputTokens != 10 || u.OutputTokens != 5 {
+		t.Errorf("planner usage = %+v, want 10 in 5 out", u)
+	}
+	if planner.Revision != nil || planner.HeadSHA != "" || executor.Revision != nil || executor.HeadSHA != "" {
+		t.Errorf("planner/executor runs carry a revision or head: %+v %+v", planner, executor)
+	}
+	changes, err := e.store.ListChanges(t.Context(), task.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) == 0 {
+		t.Fatal("no stored change")
+	}
+	head := changes[len(changes)-1].HeadSHA
+	if head == "" || r1.HeadSHA != head || r1.Purpose != model.RunPurposeReview {
+		t.Errorf("r1 run head %q purpose %s, want head %q purpose review", r1.HeadSHA, r1.Purpose, head)
+	}
+}
+
+// syncBuffer is a bytes.Buffer safe for concurrent writes.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+func TestTick_RunBudgetExceeded(t *testing.T) {
+	logs := &syncBuffer{}
+	e := newEngEnv(t, ports.WriteModeLive, func(s *daemon.Settings, d *daemon.Deps) {
+		s.Limits.MaxRunsPerTask = 2
+		d.Logger = slog.New(slog.NewTextHandler(logs, nil))
+	})
+	e.addInbox(t)
+	e.scriptToMerge()
+	task := e.tickUntil(t, 15, model.TaskStateReview)
+	for range 3 {
+		if slices.Contains(task.Flags, model.TaskFlagNeedsOwner) {
+			break
+		}
+		if err := e.engine.Tick(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		var err error
+		if task, err = e.store.GetTask(t.Context(), task.Key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if task.State != model.TaskStateReview || !slices.Equal(task.Flags, []model.TaskFlag{model.TaskFlagNeedsOwner}) {
+		t.Fatalf("task = %s %v, want review with needs-owner", task.State, task.Flags)
+	}
+	if !strings.Contains(logs.String(), "agent runs per task") {
+		t.Errorf("logs do not name the agent runs per task bound:\n%s", logs.String())
+	}
+	if n := len(e.agent.Calls()); n != 2 {
+		t.Errorf("agent calls = %d, want 2", n)
+	}
+	runs, err := e.store.ListRuns(t.Context(), task.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 {
+		t.Errorf("stored runs = %d, want 2", len(runs))
 	}
 }
 

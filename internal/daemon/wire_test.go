@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,6 +91,7 @@ func newWireEnv(t *testing.T) *wireEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
+	key, _ := engSigner(t, 1)
 	return &wireEnv{
 		cfg: daemon.Config{
 			ProjectYAML:  readTestdata(t, "project.yaml"),
@@ -109,10 +111,13 @@ func newWireEnv(t *testing.T) *wireEnv {
 		ports: daemon.Ports{
 			Agent:   fakes.NewAgent(validator),
 			Sandbox: fake.NewHost(ports.Capacity{CPUMillis: 4000, MemoryBytes: 8 << 30, DiskBytes: 64 << 30}).Sandbox("ddfd"),
-			Secrets: fakes.NewSecrets(map[string]string{"agent/example-provider": "test-secret-agent"}),
-			Clock:   fakes.NewClock(time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)),
-			IDs:     fakes.NewIDs("id"),
-			Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Secrets: fakes.NewSecrets(map[string]string{
+				"agent/example-provider": "test-secret-agent",
+				"review-signing-key":     string(key.Bytes()),
+			}),
+			Clock:  fakes.NewClock(time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)),
+			IDs:    fakes.NewIDs("id"),
+			Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		},
 	}
 }
@@ -244,6 +249,36 @@ func TestOpen_RefusesNilPortsAndBadMode(t *testing.T) {
 			if d, err := daemon.Open(context.Background(), e.cfg, e.ports); err == nil {
 				_ = d.Close() // the test fails anyway; release the store
 				t.Fatal("Open succeeded, want an error")
+			}
+		})
+	}
+}
+
+func TestOpen_MissingSigningKey(t *testing.T) {
+	cases := []struct {
+		name    string
+		secrets map[string]string
+	}{
+		{"no review-signing key", map[string]string{"agent/example-provider": "test-secret-agent"}},
+		{"review-signing key not a PEM key", map[string]string{"review-signing-key": "test-not-a-key"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newWireEnv(t)
+			e.ports.Secrets = fakes.NewSecrets(tc.secrets)
+			d, err := daemon.Open(context.Background(), e.cfg, e.ports)
+			if err == nil {
+				_ = d.Close() // the test fails anyway; release the store
+				t.Fatal("Open succeeded, want an error")
+			}
+			if !strings.Contains(err.Error(), "review-signing key") {
+				t.Errorf("Open error = %v, want it to name the review-signing key", err)
+			}
+			if strings.Contains(err.Error(), "test-not-a-key") {
+				t.Errorf("Open error %v contains the secret value", err)
+			}
+			if _, err := os.Stat(e.cfg.StorePath); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("store file stat = %v, want not created", err)
 			}
 		})
 	}
