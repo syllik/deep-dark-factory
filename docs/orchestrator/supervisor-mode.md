@@ -66,5 +66,5 @@ Not `needs-owner`, but reported:
 ## Boundaries
 
 - Telegram `/status`, `/pause`, `/resume` are equivalent channels; answers via Telegram come only from the configured user ID ([spec §9](../specs/2026-11-03-ddf-v1-design.md#9-notifications-failures-and-recovery)).
-- The supervisor never selects models or tiers; routing is operator config ([routing.md](../concepts/routing.md)).
+- The supervisor never selects models or tiers for daemon runs; routing is operator config ([routing.md](../concepts/routing.md)). The supervisor session itself runs at `standard`, never `deep`, `routine` or `fast`, like the manual-mode session ([manual-mode.md](manual-mode.md#who-does-what)); so does its [rotation successor](handoff.md#rotation).
 - To work on a task by hand instead, stop supervising and follow [manual-mode.md](manual-mode.md) on a project at `propose`.

@@ -639,3 +639,9 @@ Source: Issue #97; #43 answer 6; plan Task 15.
 - 2026-11-27 AGENT-DEFAULT: Where does the gate's OperatorMax come from? → projects.yaml maxAutonomy of the connected project (cp.MaxAutonomy), carried in Settings.OperatorMax (Minors #50 r2-1). Task: #144.
 - 2026-11-27 AGENT-DEFAULT: What does the reviewer brief contain? → JSON with title, body, spec, acceptance, head, the diff from the merge base to the head, the head's checks, the reviewer roles, and an empty priorFindings. Task: #144.
 - 2026-11-27 AGENT-DEFAULT: What comment closes the task? → Merged by DDF as <merge sha>. Task: #144.
+
+## 2026-11-27 Orchestrator session tier (Issue #150)
+
+Source: Issue #150, owner decision in the session chat on 2026-11-27 (ai-workflow side: syllik/ai-workflow#98).
+
+- 2026-11-27 The interactive orchestrator session (manual or supervisor mode) runs at `standard`, never `deep`, `routine` or `fast`; `frontier` stays never selected. A rotation successor that continues orchestration runs at `standard` too. Reason: `routine` orchestrators often failed to carry approved plans, and without a named tier rotation successors took the cheaper tier. Supersedes the 2026-11-11 AGENT-DEFAULT (#57) that the rotation rules do not name a tier. Daemon routing is unchanged. Task: #150.
