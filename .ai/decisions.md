@@ -617,6 +617,10 @@ Source: Issue #97; #43 answer 6; plan Task 15.
 - 2026-11-26 AGENT-DEFAULT: Is an empty Change.PatchID allowed, given that changes.patch_id is NOT NULL? → No. CreateChange and UpdateChange refuse an empty PatchID, HeadSHA, Branch or BaseBranch, since the gate's rule 4 needs the patch-id. Task: #143.
 - 2026-11-26 AGENT-DEFAULT: Are the executor groups parallel? → Group A (runs) and group B (changes, base merges) run in parallel. Group C (reviews, findings, decisions.md) starts after both, because CreateReview checks the change and run and its tests use newRun and newChange. Task: #143.
 
+## 2026-11-27 M2 follow-up: sync batch on workflow stop and tamper precedence (Issue #140)
+
+- 2026-11-27 AGENT-DEFAULT: How does the publishing-state workflow stop leave the sync budget untouched, given that the Executor sync run already exists? → RouteSync returns the new action ActionDiscardSyncRun with the needs-owner outcome. The daemon then finishes that sync run as discarded rather than succeeded, and CountRuns already skips discarded runs. The needs-owner flag stops the task, so the discarded run is not retried automatically. Wiring the action in the daemon is left to the engine lanes. Task: #140.
+
 ## 2026-11-27 Orchestrator session tier (Issue #150)
 
 Source: Issue #150, owner decision in the session chat on 2026-11-27 (ai-workflow side: syllik/ai-workflow#98).
