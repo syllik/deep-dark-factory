@@ -76,7 +76,10 @@ func (e *Engine) merge(ctx context.Context, it tickTask) error {
 		_, err := e.apply(ctx, t, o, nil)
 		return err
 	case lifecycle.ActionCreateChildren, lifecycle.ActionRerunReviewer, lifecycle.ActionAddReviewer, lifecycle.ActionLeave,
-		lifecycle.ActionRetry, lifecycle.ActionSyncBatch, lifecycle.ActionRerunCI, lifecycle.ActionOpenRevert, lifecycle.ActionPause, lifecycle.ActionDiscardSyncRun:
+		lifecycle.ActionRetry, lifecycle.ActionSyncBatch, lifecycle.ActionDiscardSyncRun,
+		// Pause, revert and CI reruns are Task 12c (#159); they stay
+		// fail-closed here until then.
+		lifecycle.ActionRerunCI, lifecycle.ActionOpenRevert, lifecycle.ActionPause:
 		return fmt.Errorf("route merge refusals: unexpected action %q", o.Action)
 	default:
 		return fmt.Errorf("route merge refusals: unknown action %q", o.Action)
@@ -109,19 +112,40 @@ func (e *Engine) merge(ctx context.Context, it tickTask) error {
 	return e.closeMerged(ctx, t, sha, w)
 }
 
-// closeMerged closes the forge task of t merged as mergeSHA and moves t to
-// done.
+// closeMerged moves t, merged as mergeSHA, to done and then closes its
+// forge task. Done comes first, so a failed close leaves a done task that
+// closeDone closes on a later tick (#154).
 func (e *Engine) closeMerged(ctx context.Context, t model.Task, mergeSHA string, w *ForgeWrites) error {
-	src := model.TaskSource{Forge: t.Forge, Repository: t.Repository, SourceKind: t.SourceKind, SourceID: t.SourceID}
-	if err := w.CloseTask(ctx, t.Key, src, "Merged by DDF as "+mergeSHA+"."); err != nil {
-		return err
-	}
 	o, err := lifecycle.RouteMerge(statusOf(t), lifecycle.MergeResultMerged)
 	if err != nil {
 		return err
 	}
-	_, err = e.apply(ctx, t, o, nil)
-	return err
+	if t, err = e.apply(ctx, t, o, nil); err != nil {
+		return err
+	}
+	return e.closeTask(ctx, t, mergeSHA, w)
+}
+
+// closeTask runs the close-task intent of t merged as mergeSHA.
+func (e *Engine) closeTask(ctx context.Context, t model.Task, mergeSHA string, w *ForgeWrites) error {
+	src := model.TaskSource{Forge: t.Forge, Repository: t.Repository, SourceKind: t.SourceKind, SourceID: t.SourceID}
+	return w.CloseTask(ctx, t.Key, src, "Merged by DDF as "+mergeSHA+".")
+}
+
+// closeDone runs the close-task intent again, with the same comment, for a
+// task in done whose stored change has a merge SHA. Tick steps only tasks
+// that Forge.ListCandidateTasks lists, which is the read that proves the
+// forge task is still open. Any other done task is left alone.
+func (e *Engine) closeDone(ctx context.Context, t model.Task) error {
+	change, found, err := e.taskChange(ctx, t.Key)
+	if err != nil {
+		return err
+	}
+	if !found || change.MergeSHA == "" {
+		return nil
+	}
+	e.deps.Logger.Info("done task still open on the forge; closing it again", "key", string(t.Key), "mergeSha", change.MergeSHA)
+	return e.closeTask(ctx, t, change.MergeSHA, e.intents.Forge(e.deps.Forge))
 }
 
 // gateInput builds the merge gate input of t and its stored change from the
@@ -141,7 +165,9 @@ func (e *Engine) gateInput(ctx context.Context, t model.Task, change model.Chang
 	in := gate.Input{
 		OperatorMax: e.settings.OperatorMax,
 		Profile:     e.settings.Profile,
-		Paused:      false,
+		// Pause is Task 12c (#159); until then the merge gate never sees
+		// a paused project.
+		Paused: false,
 		Task: gate.Task{Key: t.Key, Forge: t.Forge, Repository: t.Repository, State: t.State, Flags: t.Flags,
 			HitStop: t.HitStop, Risk: t.Risk},
 		Approved: nil,

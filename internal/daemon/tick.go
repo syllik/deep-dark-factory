@@ -71,9 +71,14 @@ type executorResult struct {
 }
 
 // Tick runs one pass: ingest, intake of new candidates, then at most one
-// step for every listed task without flags. Any error ends the tick (fail
-// closed); the next tick starts from the stored state.
+// step for every listed task without flags and without a pending intent.
+// Any error ends the tick (fail closed); the next tick starts from the
+// stored state. With a Lock set, Tick refuses to run until Recover has
+// succeeded on this engine.
 func (e *Engine) Tick(ctx context.Context) error {
+	if e.deps.Lock != nil && !e.recovered.Load() {
+		return errors.New("tick: recovery has not succeeded on this engine")
+	}
 	forge := e.deps.Forge
 	if e.deps.Ingest != nil {
 		if err := e.deps.Ingest(ctx, e.settings.Mode); err != nil {
@@ -107,8 +112,23 @@ func (e *Engine) Tick(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("tick: %w", err)
 	}
+	pending, err := e.deps.Store.PendingIntents(ctx)
+	if err != nil {
+		return fmt.Errorf("tick: %w", err)
+	}
+	held := map[model.TaskKey]string{}
+	for _, in := range pending {
+		if _, ok := held[in.Key]; !ok {
+			held[in.Key] = in.ID
+		}
+	}
 	for _, it := range items {
 		if len(it.task.Flags) > 0 {
+			continue
+		}
+		if id, ok := held[it.task.Key]; ok {
+			// A pending intent is recovery's to reconcile (spec §9).
+			e.deps.Logger.Info("task step held by a pending intent", "key", string(it.task.Key), "intentId", id)
 			continue
 		}
 		if err := e.step(ctx, it, dec); err != nil {
@@ -189,10 +209,10 @@ func (e *Engine) step(ctx context.Context, it tickTask, dec scheduler.Decision) 
 	case model.TaskStateCI:
 		return e.checkCI(ctx, t)
 	case model.TaskStatePublishing:
-		// A task left in publishing lost its in-memory patch; recovery is
-		// Task 12b.
-		e.deps.Logger.Debug("task in publishing left alone", "key", string(t.Key))
-		return nil
+		// A task left in publishing lost its in-memory patch, which is
+		// never stored; only the owner can decide (#146).
+		_, err := e.apply(ctx, t, *ownerOutcome(statusOf(t), "task in publishing without its patch"), nil)
+		return err
 	case model.TaskStateReview:
 		return e.review(ctx, it)
 	case model.TaskStateMerge:
@@ -201,7 +221,7 @@ func (e *Engine) step(ctx context.Context, it tickTask, dec scheduler.Decision) 
 		// Correction batches are Task 12b.
 		return nil
 	case model.TaskStateDone:
-		return nil
+		return e.closeDone(ctx, t)
 	}
 	return fmt.Errorf("step: unknown state %q", t.State)
 }
@@ -424,7 +444,13 @@ func (e *Engine) execute(ctx context.Context, it tickTask) (err error) {
 	if t, err = e.apply(ctx, t, o, run); err != nil || o.Flag != "" {
 		return err
 	}
-	return e.publish(ctx, t, copyID, base, res.Patch, r.Summary)
+	if err := e.publish(ctx, t, copyID, base, res.Patch, r.Summary); err != nil {
+		// The patch is never stored, so a task left in publishing cannot
+		// resume (#146). The flag is written even when ctx is canceled.
+		_, applyErr := e.apply(context.WithoutCancel(ctx), t, *ownerOutcome(statusOf(t), "publish failed"), nil)
+		return errors.Join(err, applyErr)
+	}
+	return nil
 }
 
 // publish prepares the revision of a task in publishing and, when it is

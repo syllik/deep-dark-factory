@@ -283,3 +283,54 @@ func TestOpen_MissingSigningKey(t *testing.T) {
 		})
 	}
 }
+
+func TestDaemon_RecoverHoldsLockUntilClose(t *testing.T) {
+	e := newWireEnv(t)
+	lock := fakes.NewLock()
+	e.ports.Lock = lock
+	d, err := daemon.Open(context.Background(), e.cfg, e.ports)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	if err := d.Engine.Tick(context.Background()); err == nil {
+		t.Fatal("Tick before Recover succeeded, want error")
+	}
+	if err := d.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if err := d.Recover(context.Background()); err == nil {
+		t.Error("second Recover succeeded, want error")
+	}
+	if _, err := lock.TryAcquire(context.Background()); !errors.Is(err, ports.ErrLocked) {
+		t.Fatalf("TryAcquire while recovered = %v, want ports.ErrLocked", err)
+	}
+	if err := d.Engine.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick after Recover: %v", err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	rel, err := lock.TryAcquire(context.Background())
+	if err != nil {
+		t.Fatalf("TryAcquire after Close = %v, want the lock released", err)
+	}
+	if err := rel(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+}
+
+func TestDaemon_RecoverWithoutLock(t *testing.T) {
+	e := newWireEnv(t)
+	d, err := daemon.Open(context.Background(), e.cfg, e.ports)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	if err := d.Recover(context.Background()); err == nil {
+		t.Error("Recover without a Lock succeeded, want error")
+	}
+}

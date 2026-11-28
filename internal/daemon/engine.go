@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sync/atomic"
 
 	"github.com/syllik/deep-dark-factory/internal/core/config"
 	"github.com/syllik/deep-dark-factory/internal/core/lifecycle"
@@ -27,6 +28,7 @@ type Store interface {
 	GetTask(ctx context.Context, key model.TaskKey) (model.Task, error)
 	CreateRun(ctx context.Context, r model.Run) error
 	FinishRun(ctx context.Context, r model.Run) error
+	GetRun(ctx context.Context, id string) (model.Run, error)
 	ListRuns(ctx context.Context, key model.TaskKey) ([]model.Run, error)
 	CreateChange(ctx context.Context, c model.Change) error
 	UpdateChange(ctx context.Context, c model.Change) error
@@ -35,7 +37,11 @@ type Store interface {
 	CreateReview(ctx context.Context, r model.Review, findings []model.Finding) error
 	ListReviews(ctx context.Context, key model.TaskKey, changeID string) ([]model.Review, error)
 	ListBaseMerges(ctx context.Context, key model.TaskKey, changeID string) ([]store.BaseMerge, error)
+	PendingIntents(ctx context.Context) ([]model.Intent, error)
+	AppendEvent(ctx context.Context, ev model.Event) error
 }
+
+var _ Store = (*store.Store)(nil)
 
 // CheckRunner runs the pending checks of a forge that checks locally;
 // *local.Forge implements it.
@@ -60,12 +66,17 @@ type Settings struct {
 	OperatorMax policy.Autonomy
 }
 
-// Deps are the engine's ports and collaborators. Checks and Ingest may be
-// nil. Signer signs the stored reviews; Verifier is the only key set the
-// merge gate trusts.
+// Deps are the engine's ports and collaborators. Checks, Ingest and Lock
+// may be nil; Sandbox is required. Signer signs the stored reviews;
+// Verifier is the only key set the merge gate trusts. Sandbox is what
+// recovery lists, kills and tears down; Recover refuses a nil Lock. With a
+// Lock set, Tick runs only after Recover succeeded on the engine (plan
+// OD-9).
 type Deps struct {
 	Store     Store
 	Forge     ports.Forge
+	Sandbox   ports.Sandbox
+	Lock      ports.Lock
 	Agent     ports.Agent
 	Secrets   ports.Secrets
 	Clock     ports.Clock
@@ -87,6 +98,8 @@ type Engine struct {
 	settings Settings
 	deps     Deps
 	intents  *Intents
+	// recovered is set once Recover succeeded on this engine.
+	recovered atomic.Bool
 }
 
 // New validates s and d and returns an Engine. Every forge write and the
@@ -117,6 +130,7 @@ func (d Deps) validate() error {
 	}{
 		{"store", d.Store == nil},
 		{"forge", d.Forge == nil},
+		{"sandbox", d.Sandbox == nil},
 		{"agent", d.Agent == nil},
 		{"secrets", d.Secrets == nil},
 		{"clock", d.Clock == nil},

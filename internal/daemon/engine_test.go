@@ -326,6 +326,7 @@ type engEnv struct {
 	bare     string
 	dataDir  string
 	forge    *local.Forge
+	sandbox  ports.Sandbox
 	store    *store.Store
 	rec      *recorder
 	agent    *fakes.Agent
@@ -400,7 +401,7 @@ func newEngEnv(t *testing.T, mode ports.WriteMode, adjust func(*daemon.Settings,
 		OperatorMax: policy.AutonomyMergeIntegration,
 	}
 	d := daemon.Deps{
-		Store: recStore{Store: st, rec: rec}, Forge: recForge{Forge: f, rec: rec}, Agent: agent,
+		Store: recStore{Store: st, rec: rec}, Forge: recForge{Forge: f, rec: rec}, Sandbox: sb, Agent: agent,
 		Secrets: fakes.NewSecrets(map[string]string{"agent/" + engProvider: "test-secret-agent"}),
 		Clock:   clock, IDs: ids, Git: r,
 		Publisher: &publisher.Publisher{Git: r, Clone: cloneDir, Scratch: scratch, Sandbox: sb, Clock: clock, IDs: ids},
@@ -419,7 +420,7 @@ func newEngEnv(t *testing.T, mode ports.WriteMode, adjust func(*daemon.Settings,
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return &engEnv{git: r, bare: bare, dataDir: dataDir, forge: f, store: st, rec: rec, agent: agent, clock: clock,
+	return &engEnv{git: r, bare: bare, dataDir: dataDir, forge: f, sandbox: sb, store: st, rec: rec, agent: agent, clock: clock,
 		settings: s, engine: e, signer: signer, verifier: verifier}
 }
 
@@ -705,6 +706,72 @@ func TestTick_ExecutorBlockedSetsNeedsOwner(t *testing.T) {
 	}
 }
 
+// publishFaultForge fails every PublishChange before it reaches the inner
+// forge.
+type publishFaultForge struct{ ports.Forge }
+
+func (publishFaultForge) PublishChange(context.Context, ports.WriteMode, ports.PublishRequest) (ports.ChangeInfo, error) {
+	return ports.ChangeInfo{}, errors.New("test forge: publish change unavailable")
+}
+
+func TestTick_PublishFailureSetsNeedsOwner(t *testing.T) {
+	e := newEngEnv(t, ports.WriteModeLive, func(_ *daemon.Settings, d *daemon.Deps) {
+		d.Forge = publishFaultForge{Forge: d.Forge}
+	})
+	e.addInbox(t)
+	e.scriptHappyPath()
+	var tickErr error
+	for i := 0; i < 6 && tickErr == nil; i++ {
+		tickErr = e.engine.Tick(t.Context())
+	}
+	if tickErr == nil || !strings.Contains(tickErr.Error(), "publish change unavailable") {
+		t.Fatalf("tick err = %v, want the publish error", tickErr)
+	}
+	task, err := e.store.GetTask(t.Context(), e.candidateKey(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.State != model.TaskStatePublishing || !slices.Equal(task.Flags, []model.TaskFlag{model.TaskFlagNeedsOwner}) {
+		t.Errorf("task = %s %v, want publishing with needs-owner", task.State, task.Flags)
+	}
+	// The flagged task gets no further step.
+	if err := e.engine.Tick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := e.store.PendingIntents(t.Context()); err != nil || len(pending) != 0 {
+		t.Errorf("pending intents = %v, %v; want none", pending, err)
+	}
+}
+
+func TestTick_PublishingWithoutPatchSetsNeedsOwner(t *testing.T) {
+	e := newEngEnv(t, ports.WriteModeLive, nil)
+	e.addInbox(t)
+	if err := e.engine.Tick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	task, err := e.store.GetTask(t.Context(), e.candidateKey(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A task left in publishing by a crash between execute and publish.
+	task.State = model.TaskStatePublishing
+	if err := e.store.UpdateTask(t.Context(), task, model.Event{Key: task.Key, Type: "transition", At: e.clock.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.engine.Tick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if task, err = e.store.GetTask(t.Context(), task.Key); err != nil {
+		t.Fatal(err)
+	}
+	if task.State != model.TaskStatePublishing || !slices.Equal(task.Flags, []model.TaskFlag{model.TaskFlagNeedsOwner}) {
+		t.Errorf("task = %s %v, want publishing with needs-owner", task.State, task.Flags)
+	}
+	if got := e.rec.eventStrings(); len(got) != 0 {
+		t.Errorf("intent and write calls = %v, want none", got)
+	}
+}
+
 func TestNew_RefusesInvalidInputs(t *testing.T) {
 	e := newEngEnv(t, ports.WriteModeLive, nil)
 	cases := []struct {
@@ -722,6 +789,7 @@ func TestNew_RefusesInvalidInputs(t *testing.T) {
 		{"invalid profile", func(s *daemon.Settings, _ *daemon.Deps) { s.Profile.Autonomy = "" }},
 		{"nil store", func(_ *daemon.Settings, d *daemon.Deps) { d.Store = nil }},
 		{"nil forge", func(_ *daemon.Settings, d *daemon.Deps) { d.Forge = nil }},
+		{"nil sandbox", func(_ *daemon.Settings, d *daemon.Deps) { d.Sandbox = nil }},
 		{"nil agent", func(_ *daemon.Settings, d *daemon.Deps) { d.Agent = nil }},
 		{"nil pusher", func(_ *daemon.Settings, d *daemon.Deps) { d.Pusher = nil }},
 		{"nil validator", func(_ *daemon.Settings, d *daemon.Deps) { d.Validator = nil }},
@@ -732,7 +800,7 @@ func TestNew_RefusesInvalidInputs(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			s := e.settings
-			d := daemon.Deps{Store: e.store, Forge: e.forge, Agent: e.agent, Secrets: fakes.NewSecrets(nil), Clock: e.clock,
+			d := daemon.Deps{Store: e.store, Forge: e.forge, Sandbox: e.sandbox, Agent: e.agent, Secrets: fakes.NewSecrets(nil), Clock: e.clock,
 				IDs: fakes.NewIDs("x"), Git: e.git, Publisher: &publisher.Publisher{}, Pusher: daemon.NewGitPusher(e.git, slog.Default()),
 				Validator: &model.ResultValidator{}, Signer: e.signer, Verifier: e.verifier, Logger: slog.Default()}
 			if _, err := daemon.New(s, d); err != nil {
