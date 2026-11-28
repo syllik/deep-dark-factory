@@ -17,7 +17,8 @@ const (
 	insertTaskSQL = "INSERT INTO tasks (" + taskColumns + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 	updateTaskSQL = "UPDATE tasks SET state = ?, flag_needs_owner = ?, flag_hold = ?, flag_failed = ?, risk = ?, " +
 		"priority = ?, hit_stop = ?, updated_at = ?, teardown_at = ?, payload = ? WHERE task_key = ?"
-	getTaskSQL = "SELECT " + taskColumns + " FROM tasks WHERE task_key = ?"
+	getTaskSQL   = "SELECT " + taskColumns + " FROM tasks WHERE task_key = ?"
+	listTasksSQL = "SELECT " + taskColumns + " FROM tasks ORDER BY created_at, task_key"
 )
 
 // taskPayload is the ddf.task/v1 payload: the task fields that are not
@@ -113,6 +114,33 @@ func (s *Store) GetTask(ctx context.Context, key model.TaskKey) (model.Task, err
 		return model.Task{}, fmt.Errorf("get task %s: %w", key, err)
 	}
 	return t, nil
+}
+
+// ListTasks returns every task in any state, tasks in done included, ordered
+// by created_at, then task_key. Any undecodable row fails the whole read.
+// The revert rule needs this project-wide view: a red integration commit can
+// come from a change of a task that is already done (spec §5.2 Revert).
+func (s *Store) ListTasks(ctx context.Context) (tasks []model.Task, err error) {
+	rows, err := s.db.QueryContext(ctx, listTasksSQL)
+	if err != nil {
+		return nil, fmt.Errorf("list tasks: %w", err)
+	}
+	defer func() {
+		if cerr := rows.Close(); cerr != nil && err == nil {
+			tasks, err = nil, fmt.Errorf("close tasks rows: %w", cerr)
+		}
+	}()
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list tasks: %w", err)
+		}
+		tasks = append(tasks, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list tasks: %w", err)
+	}
+	return tasks, nil
 }
 
 // checkTaskEvent validates a task and the event of its state change.

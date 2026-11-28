@@ -111,6 +111,10 @@ func TestEnums_RoundTripAndRejectUnknown(t *testing.T) {
 		{"FindingRoute spec §4.5", func(t *testing.T) {
 			checkEnum(t, "fixing followup minors", []model.FindingRoute{model.FindingRouteFixing, model.FindingRouteFollowup, model.FindingRouteMinors}, model.ParseFindingRoute)
 		}},
+		{"PauseReason spec §9", func(t *testing.T) {
+			checkEnum(t, "owner credential revert-red runtime security",
+				[]model.PauseReason{model.PauseReasonOwner, model.PauseReasonCredential, model.PauseReasonRevertRed, model.PauseReasonRuntime, model.PauseReasonSecurity}, model.ParsePauseReason)
+		}},
 		{"IntentOperation spec §4.5", func(t *testing.T) {
 			checkEnum(t, "create-task push open-change update-change post-review update-branch merge revert close-task reopen-task",
 				[]model.IntentOperation{model.IntentOperationCreateTask, model.IntentOperationPush, model.IntentOperationOpenChange, model.IntentOperationUpdateChange, model.IntentOperationPostReview, model.IntentOperationUpdateBranch, model.IntentOperationMerge, model.IntentOperationRevert, model.IntentOperationCloseTask, model.IntentOperationReopenTask}, model.ParseIntentOperation)

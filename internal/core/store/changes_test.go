@@ -233,3 +233,104 @@ func TestChange_DecodeFailsClosed(t *testing.T) {
 		})
 	}
 }
+
+// #158: FindChangeByMergeSHA maps an integration commit to its one change.
+func TestChange_FindByMergeSHA(t *testing.T) {
+	s, _ := newTestStore(t)
+	done, other := newTask(t, "1"), newTask(t, "2")
+	mustCreate(t, s, done)
+	mustCreate(t, s, other)
+	merged := t0.Add(time.Hour)
+	c := newChange(done.Key, "c1")
+	c.Open, c.MergeSHA, c.MergedAt = false, "merge1", &merged
+	mustCreateChange(t, s, c)
+	mustCreateChange(t, s, newChange(other.Key, "c1"))
+	done.State, done.UpdatedAt = model.TaskStateDone, merged
+	if err := s.UpdateTask(t.Context(), done, taskEvent(done, "done")); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+
+	got, err := s.FindChangeByMergeSHA(t.Context(), "merge1")
+	if err != nil {
+		t.Fatalf("FindChangeByMergeSHA: %v", err)
+	}
+	if want := utcChange(c); !reflect.DeepEqual(got, want) {
+		t.Fatalf("FindChangeByMergeSHA =\n%+v\nwant\n%+v", got, want)
+	}
+	if _, err := s.FindChangeByMergeSHA(t.Context(), "unknown"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("unknown SHA = %v, want ErrNotFound", err)
+	}
+	if _, err := s.FindChangeByMergeSHA(t.Context(), ""); err == nil || errors.Is(err, store.ErrNotFound) {
+		t.Errorf("empty SHA = %v, want a non-ErrNotFound error", err)
+	}
+
+	dup := newChange(other.Key, "c2")
+	dup.Open, dup.MergeSHA, dup.MergedAt = false, "merge1", &merged
+	mustCreateChange(t, s, dup)
+	_, err = s.FindChangeByMergeSHA(t.Context(), "merge1")
+	if err == nil || errors.Is(err, store.ErrNotFound) {
+		t.Errorf("shared merge SHA = %v, want a non-ErrNotFound error", err)
+	}
+}
+
+// #158: ListChangesSince returns changes of one kind across tasks from since.
+func TestChange_ListSince(t *testing.T) {
+	s, _ := newTestStore(t)
+	t1, t2 := newTask(t, "1"), newTask(t, "2")
+	mustCreate(t, s, t1)
+	mustCreate(t, s, t2)
+	revert := func(key model.TaskKey, id string, at time.Time) model.Change {
+		c := newChange(key, id)
+		c.Kind, c.CreatedAt, c.UpdatedAt = model.ChangeKindRevert, at, at
+		return c
+	}
+	since := t0
+	atSince2 := revert(t2.Key, "r1", since)
+	atSince1 := revert(t1.Key, "r1", since)
+	later := revert(t1.Key, "r2", since.Add(time.Minute))
+	older := revert(t2.Key, "r0", since.Add(-time.Millisecond))
+	plain := newChange(t1.Key, "c1")
+	plain.CreatedAt = since.Add(time.Second)
+	for _, c := range []model.Change{later, atSince2, older, plain, atSince1} {
+		mustCreateChange(t, s, c)
+	}
+
+	got, err := s.ListChangesSince(t.Context(), model.ChangeKindRevert, since)
+	if err != nil {
+		t.Fatalf("ListChangesSince: %v", err)
+	}
+	first, second := atSince1, atSince2
+	if first.Key > second.Key {
+		first, second = second, first
+	}
+	want := []model.Change{utcChange(first), utcChange(second), utcChange(later)}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListChangesSince =\n%+v\nwant\n%+v", got, want)
+	}
+	if _, err := s.ListChangesSince(t.Context(), "fork", since); err == nil {
+		t.Error("ListChangesSince with invalid kind succeeded")
+	}
+	if _, err := s.ListChangesSince(t.Context(), "", since); err == nil {
+		t.Error("ListChangesSince with empty kind succeeded")
+	}
+}
+
+// #158: an undecodable changes row fails the whole ListChangesSince read.
+func TestChange_ListSinceFailsClosed(t *testing.T) {
+	s, path := newTestStore(t)
+	task := newTask(t, "1")
+	mustCreate(t, s, task)
+	c := newChange(task.Key, "r1")
+	c.Kind = model.ChangeKindRevert
+	mustCreateChange(t, s, c)
+	if _, err := rawDB(t, path).ExecContext(t.Context(), "UPDATE changes SET open = 2"); err != nil {
+		t.Fatalf("raw exec: %v", err)
+	}
+	got, err := s.ListChangesSince(t.Context(), model.ChangeKindRevert, t0)
+	if got != nil {
+		t.Errorf("partial list %+v", got)
+	}
+	if !errors.Is(err, store.ErrDecode) {
+		t.Fatalf("ListChangesSince error = %v, want ErrDecode", err)
+	}
+}

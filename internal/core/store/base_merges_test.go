@@ -3,6 +3,7 @@ package store_test
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,12 +12,21 @@ import (
 )
 
 // mustBranchIntent stores update-branch intent id of key, resolved with
-// status and newSHA unless status is pending.
+// status and newSHA unless status is pending. Its expected old SHA and target
+// ref match newBaseMerge on a newChange.
 func mustBranchIntent(t *testing.T, s *store.Store, key model.TaskKey, id string, op model.IntentOperation,
 	status model.IntentStatus, newSHA string) {
 	t.Helper()
+	mustBranchIntentRef(t, s, key, id, op, status, newSHA, "head1", "refs/heads/b")
+}
+
+// mustBranchIntentRef is mustBranchIntent with an explicit expected old SHA
+// and target ref.
+func mustBranchIntentRef(t *testing.T, s *store.Store, key model.TaskKey, id string, op model.IntentOperation,
+	status model.IntentStatus, newSHA, expectedOld, targetRef string) {
+	t.Helper()
 	in := newIntent(key, id, t0)
-	in.Operation = op
+	in.Operation, in.ExpectedOldSHA, in.TargetRef = op, expectedOld, targetRef
 	if err := s.CreateIntent(t.Context(), in); err != nil {
 		t.Fatalf("CreateIntent %s: %v", id, err)
 	}
@@ -107,6 +117,18 @@ func TestBaseMerge_RequiresIntent(t *testing.T) {
 		{"other new SHA", func(t *testing.T, s *store.Store, key, _ model.TaskKey) {
 			mustBranchIntent(t, s, key, "i1", model.IntentOperationUpdateBranch, model.IntentStatusSucceeded, "m2")
 		}},
+		{"expected old SHA not the parent head", func(t *testing.T, s *store.Store, key, _ model.TaskKey) {
+			mustBranchIntentRef(t, s, key, "i1", model.IntentOperationUpdateBranch, model.IntentStatusSucceeded, "m1",
+				"head0", "refs/heads/b")
+		}},
+		{"target ref not the change branch", func(t *testing.T, s *store.Store, key, _ model.TaskKey) {
+			mustBranchIntentRef(t, s, key, "i1", model.IntentOperationUpdateBranch, model.IntentStatusSucceeded, "m1",
+				"head1", "refs/heads/other")
+		}},
+		{"target ref without refs/heads", func(t *testing.T, s *store.Store, key, _ model.TaskKey) {
+			mustBranchIntentRef(t, s, key, "i1", model.IntentOperationUpdateBranch, model.IntentStatusSucceeded, "m1",
+				"head1", "b")
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -124,6 +146,33 @@ func TestBaseMerge_RequiresIntent(t *testing.T) {
 				t.Errorf("base_merges rows = %d, want 0", n)
 			}
 		})
+	}
+}
+
+// #148: an intent backs at most one base merge, of any change.
+func TestBaseMerge_IntentReuseRefused(t *testing.T) {
+	s, path := newTestStore(t)
+	task := newTask(t, "1")
+	mustCreate(t, s, task)
+	mustCreateChange(t, s, newChange(task.Key, "c1"))
+	mustCreateChange(t, s, newChange(task.Key, "c2"))
+	mustBranchIntent(t, s, task.Key, "i1", model.IntentOperationUpdateBranch, model.IntentStatusSucceeded, "m1")
+	if err := s.CreateBaseMerge(t.Context(), newBaseMerge(task.Key, "m1", "i1")); err != nil {
+		t.Fatalf("first CreateBaseMerge: %v", err)
+	}
+	// Same merge SHA, parent head and branch on another change: only the
+	// intent reuse fails.
+	reuse := newBaseMerge(task.Key, "m1", "i1")
+	reuse.ChangeID = "c2"
+	err := s.CreateBaseMerge(t.Context(), reuse)
+	if !errors.Is(err, store.ErrBaseMergeIntent) {
+		t.Fatalf("reused intent CreateBaseMerge = %v, want ErrBaseMergeIntent", err)
+	}
+	if !strings.Contains(err.Error(), "already used") {
+		t.Errorf("error %q is not the reuse refusal", err)
+	}
+	if n := countBaseMerges(t, path); n != 1 {
+		t.Errorf("base_merges rows = %d, want 1", n)
 	}
 }
 

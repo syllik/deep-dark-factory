@@ -15,6 +15,7 @@ const (
 	SchemaIDDecision       SchemaID = "ddf.decision/v1"
 	SchemaIDIntent         SchemaID = "ddf.intent/v1"
 	SchemaIDEvent          SchemaID = "ddf.event/v1"
+	SchemaIDPauseReason    SchemaID = "ddf.pause-reason/v1"
 	SchemaIDPlannerResult  SchemaID = "ddf.planner.result/v1"
 	SchemaIDExecutorResult SchemaID = "ddf.executor.result/v1"
 	SchemaIDReviewerResult SchemaID = "ddf.reviewer.result/v1"
