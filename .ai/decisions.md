@@ -662,3 +662,12 @@ Source: planner result of #157 (https://github.com/syllik/deep-dark-factory/issu
 - 2026-11-28 AGENT-DEFAULT: Which pending intents cannot be reconciled? → Those with no forge or clean-clone read that proves their outcome: post-review, create-task, revert, reopen-task, a merge on a change that is no longer open, an update-branch whose head moved, and any push or change whose head matches neither the old nor the new SHA. They stay pending and the task gets needs-owner. Recovery never writes a base-merge record. Task: #160.
 - 2026-11-28 AGENT-DEFAULT: How is #154 fixed without a project-wide task listing? → Move the task to done first, then close the forge task. A done task whose change has a MergeSHA and that is still listed as a forge candidate gets the close again. Task: #160.
 - 2026-11-28 AGENT-DEFAULT: What happens to a task left in publishing (#146)? → needs-owner, both when publish errors and when a later tick finds an unflagged task in publishing, because the patch was never stored. Task: #160.
+
+## 2026-11-28 M2 Task 12b-2: bounds through the tick (Issue #161, part 2 of #157)
+
+Source: planner result of #157 (https://github.com/syllik/deep-dark-factory/issues/157#issuecomment-7237652853), child 2.
+
+- 2026-11-28 AGENT-DEFAULT: Where does the Executor's wontFix list live between the correction batch and the re-review, given no store column holds it? → It is rendered into the revision's change body (the Publisher sanitizes and redacts it). The re-review brief carries the forge change body as untrusted data. A structured store column is a follow-up. Task: #161.
+- 2026-11-28 AGENT-DEFAULT: Is the one automatic CI rerun per head in scope? → No. RerunChecks has no intent operation; a failed check goes straight to a CI-fix batch. Task: #161.
+- 2026-11-28 AGENT-DEFAULT: What happens when the stored change is not found on the forge? → In ci the task stays, as in review. In fixing it is needs-owner, because a batch cannot run without the forge head. Task: #161.
+- 2026-11-28 AGENT-DEFAULT: What does a correction batch after a local gate failure of the first revision carry, with no change stored yet? → No revision and no head on its run; its brief names the integration tip it was built on, and its publish records revision 1. After a later revision's gate failure the correction publishes revision + 1. Task: #161.
