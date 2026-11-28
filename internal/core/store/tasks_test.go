@@ -282,3 +282,55 @@ func TestSchema_QuestionsHeadSHA(t *testing.T) {
 		t.Fatalf("questions columns %s, want head_sha after category", got)
 	}
 }
+
+// #158: ListTasks returns every task, done included, by created_at then key.
+func TestTask_ListAll(t *testing.T) {
+	s, _ := newTestStore(t)
+	a, b, c := newTask(t, "a"), newTask(t, "b"), newTask(t, "c")
+	c.CreatedAt, c.UpdatedAt = t0.Add(-time.Second), t0.Add(-time.Second)
+	for _, task := range []model.Task{b, a, c} {
+		mustCreate(t, s, task)
+	}
+	b.State, b.UpdatedAt = model.TaskStateDone, t0.Add(time.Hour)
+	if err := s.UpdateTask(t.Context(), b, taskEvent(b, "done")); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+	got, err := s.ListTasks(t.Context())
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	want := []model.Task{utcTask(c)}
+	for _, task := range []model.Task{a, b} {
+		want = append(want, utcTask(task))
+	}
+	if want[1].Key > want[2].Key {
+		want[1], want[2] = want[2], want[1]
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListTasks =\n%+v\nwant\n%+v", got, want)
+	}
+	found := false
+	for _, task := range got {
+		found = found || (task.Key == b.Key && task.State == model.TaskStateDone)
+	}
+	if !found {
+		t.Error("done task missing from ListTasks")
+	}
+}
+
+// #158: an undecodable tasks row fails the whole ListTasks read.
+func TestTask_ListAllFailsClosed(t *testing.T) {
+	s, path := newTestStore(t)
+	mustCreate(t, s, newTask(t, "a"))
+	mustCreate(t, s, newTask(t, "b"))
+	if _, err := rawDB(t, path).ExecContext(t.Context(), "UPDATE tasks SET state = 'lost' WHERE source_id = 'b'"); err != nil {
+		t.Fatalf("raw exec: %v", err)
+	}
+	got, err := s.ListTasks(t.Context())
+	if got != nil {
+		t.Errorf("partial list %+v", got)
+	}
+	if !errors.Is(err, store.ErrDecode) {
+		t.Fatalf("ListTasks error = %v, want ErrDecode", err)
+	}
+}

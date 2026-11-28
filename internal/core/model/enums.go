@@ -447,3 +447,28 @@ func ParseIntentOperation(s string) (IntentOperation, error) {
 func (op *IntentOperation) UnmarshalText(b []byte) error {
 	return unmarshalEnum(op, b, ParseIntentOperation)
 }
+
+// PauseReason is one reason in the global pause set (spec §9 Global pause):
+// the daemon is paused while the set is non-empty.
+type PauseReason string
+
+// PauseReason values.
+const (
+	PauseReasonOwner      PauseReason = "owner"
+	PauseReasonCredential PauseReason = "credential"
+	PauseReasonRevertRed  PauseReason = "revert-red"
+	PauseReasonRuntime    PauseReason = "runtime"
+	PauseReasonSecurity   PauseReason = "security"
+)
+
+// ParsePauseReason returns the PauseReason spelled s; an unknown or empty value is an error.
+func ParsePauseReason(s string) (PauseReason, error) {
+	return parseEnum("pause reason", s, []PauseReason{
+		PauseReasonOwner, PauseReasonCredential, PauseReasonRevertRed, PauseReasonRuntime, PauseReasonSecurity,
+	})
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler through ParsePauseReason.
+func (pr *PauseReason) UnmarshalText(b []byte) error {
+	return unmarshalEnum(pr, b, ParsePauseReason)
+}

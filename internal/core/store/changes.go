@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/syllik/deep-dark-factory/internal/core/model"
 )
@@ -17,8 +18,12 @@ const (
 	insertChangeSQL = "INSERT INTO changes (" + changeColumns + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 	updateChangeSQL = "UPDATE changes SET head_sha = ?, revision = ?, open = ?, draft = ?, patch_id = ?, merge_sha = ?, " +
 		"merged_at = ?, ci_since = ?, updated_at = ?, payload = ? WHERE task_key = ? AND change_id = ?"
-	getChangeSQL   = "SELECT " + changeColumns + " FROM changes WHERE task_key = ? AND change_id = ?"
-	listChangesSQL = "SELECT " + changeColumns + " FROM changes WHERE task_key = ? ORDER BY created_at, change_id"
+	getChangeSQL         = "SELECT " + changeColumns + " FROM changes WHERE task_key = ? AND change_id = ?"
+	listChangesSQL       = "SELECT " + changeColumns + " FROM changes WHERE task_key = ? ORDER BY created_at, change_id"
+	findChangeByMergeSQL = "SELECT " + changeColumns + " FROM changes WHERE merge_sha = ? " +
+		"ORDER BY task_key, change_id LIMIT 2"
+	listChangesSinceSQL = "SELECT " + changeColumns + " FROM changes WHERE kind = ? AND created_at >= ? " +
+		"ORDER BY created_at, task_key, change_id"
 )
 
 // changePayload is the ddf.change/v1 payload: every Change field is a
@@ -131,6 +136,77 @@ func (s *Store) ListChanges(ctx context.Context, key model.TaskKey) (changes []m
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list changes %s: %w", key, err)
+	}
+	return changes, nil
+}
+
+// FindChangeByMergeSHA returns the one change, across all tasks and tasks in
+// done included, whose merge_sha is mergeSHA. The revert rule uses it to map
+// a red integration commit to the change that merged it (spec §5.2 Revert).
+// An empty mergeSHA is an error, no such change is ErrNotFound, and more
+// than one such change is an error (not ErrNotFound): the store fails closed
+// and does not pick one.
+func (s *Store) FindChangeByMergeSHA(ctx context.Context, mergeSHA string) (c model.Change, err error) {
+	if mergeSHA == "" {
+		return model.Change{}, errors.New("find change by merge SHA: empty merge SHA")
+	}
+	rows, err := s.db.QueryContext(ctx, findChangeByMergeSQL, mergeSHA)
+	if err != nil {
+		return model.Change{}, fmt.Errorf("find change by merge SHA %s: %w", mergeSHA, err)
+	}
+	defer func() {
+		if cerr := rows.Close(); cerr != nil && err == nil {
+			c, err = model.Change{}, fmt.Errorf("close changes rows: %w", cerr)
+		}
+	}()
+	var found []model.Change
+	for rows.Next() {
+		ch, err := scanChange(rows)
+		if err != nil {
+			return model.Change{}, fmt.Errorf("find change by merge SHA %s: %w", mergeSHA, err)
+		}
+		found = append(found, ch)
+	}
+	if err := rows.Err(); err != nil {
+		return model.Change{}, fmt.Errorf("find change by merge SHA %s: %w", mergeSHA, err)
+	}
+	switch len(found) {
+	case 0:
+		return model.Change{}, fmt.Errorf("find change by merge SHA %s: %w", mergeSHA, ErrNotFound)
+	case 1:
+		return found[0], nil
+	default:
+		return model.Change{}, fmt.Errorf("find change by merge SHA %s: several changes share it", mergeSHA)
+	}
+}
+
+// ListChangesSince returns the changes of kind, across all tasks and tasks in
+// done included, created at or after since, ordered by created_at, task_key,
+// then change_id. An invalid kind is an error, and any undecodable row fails
+// the whole read. The revert rule reads its revert-red attribution from
+// changes of kind revert by created_at (spec §4.5, §5.2 Revert).
+func (s *Store) ListChangesSince(ctx context.Context, kind model.ChangeKind, since time.Time) (changes []model.Change, err error) {
+	if _, err := model.ParseChangeKind(string(kind)); err != nil {
+		return nil, fmt.Errorf("list changes since: %w", err)
+	}
+	rows, err := s.db.QueryContext(ctx, listChangesSinceSQL, string(kind), ms(since))
+	if err != nil {
+		return nil, fmt.Errorf("list %s changes since: %w", kind, err)
+	}
+	defer func() {
+		if cerr := rows.Close(); cerr != nil && err == nil {
+			changes, err = nil, fmt.Errorf("close changes rows: %w", cerr)
+		}
+	}()
+	for rows.Next() {
+		c, err := scanChange(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list %s changes since: %w", kind, err)
+		}
+		changes = append(changes, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list %s changes since: %w", kind, err)
 	}
 	return changes, nil
 }

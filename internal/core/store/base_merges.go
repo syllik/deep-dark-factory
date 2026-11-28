@@ -17,12 +17,15 @@ const (
 	insertBaseMergeSQL = "INSERT INTO base_merges (" + baseMergeColumns + ") VALUES (?, ?, ?, ?, ?, ?, ?)"
 	listBaseMergesSQL  = "SELECT " + baseMergeColumns + " FROM base_merges WHERE task_key = ? AND change_id = ? " +
 		"ORDER BY created_at, merge_sha"
-	changeExistsSQL = "SELECT 1 FROM changes WHERE task_key = ? AND change_id = ?"
+	changeBranchSQL        = "SELECT branch FROM changes WHERE task_key = ? AND change_id = ?"
+	baseMergeIntentUsedSQL = "SELECT 1 FROM base_merges WHERE intent_id = ? LIMIT 1"
 )
 
-// ErrBaseMergeIntent reports a base merge without its daemon intent: no
-// succeeded update-branch intent of the same task whose new SHA is the
-// merge SHA.
+// ErrBaseMergeIntent reports a base merge without its daemon intent: the
+// intent is missing, of another task, not an update-branch, not succeeded,
+// its new SHA is not the merge SHA, its expected old SHA is not the parent
+// head SHA, its target ref is not refs/heads/<change branch>, or another
+// base merge already cites it.
 var ErrBaseMergeIntent = errors.New("store: base merge without its daemon intent")
 
 // BaseMerge is a daemon-created base merge of spec §6.6 rule 4: the merge
@@ -41,8 +44,10 @@ type BaseMerge struct {
 // CreateBaseMerge inserts bm in one transaction. The change (bm.Key,
 // bm.ChangeID) must exist, else ErrNotFound. The intent bm.IntentID must be
 // a succeeded update-branch intent of bm.Key whose new SHA is bm.MergeSHA,
-// else ErrBaseMergeIntent. Base merges are insert-only, and no event is
-// appended.
+// whose expected old SHA is bm.ParentHeadSHA and whose target ref is
+// refs/heads/<change branch>, and no base merge (of any task or change) may
+// already cite it; else ErrBaseMergeIntent and nothing is written. Base
+// merges are insert-only, and no event is appended.
 //
 // spec §6.6 rule 4: its SHA recorded in the store from the daemon's own intent
 func (s *Store) CreateBaseMerge(ctx context.Context, bm BaseMerge) error {
@@ -50,8 +55,8 @@ func (s *Store) CreateBaseMerge(ctx context.Context, bm BaseMerge) error {
 		return fmt.Errorf("create base merge %s: %w", bm.MergeSHA, err)
 	}
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		var one int
-		err := tx.QueryRowContext(ctx, changeExistsSQL, string(bm.Key), bm.ChangeID).Scan(&one)
+		var branch string
+		err := tx.QueryRowContext(ctx, changeBranchSQL, string(bm.Key), bm.ChangeID).Scan(&branch)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("change %s: %w", bm.ChangeID, ErrNotFound)
 		}
@@ -74,6 +79,19 @@ func (s *Store) CreateBaseMerge(ctx context.Context, bm BaseMerge) error {
 			return fmt.Errorf("%w: intent %s status %s", ErrBaseMergeIntent, in.ID, in.Status)
 		case in.NewSHA != bm.MergeSHA:
 			return fmt.Errorf("%w: intent %s new SHA %q", ErrBaseMergeIntent, in.ID, in.NewSHA)
+		case in.ExpectedOldSHA != bm.ParentHeadSHA:
+			return fmt.Errorf("%w: intent %s expected old SHA %q, parent head %q",
+				ErrBaseMergeIntent, in.ID, in.ExpectedOldSHA, bm.ParentHeadSHA)
+		case in.TargetRef != "refs/heads/"+branch:
+			return fmt.Errorf("%w: intent %s target ref %q, change branch %q", ErrBaseMergeIntent, in.ID, in.TargetRef, branch)
+		}
+		var one int
+		err = tx.QueryRowContext(ctx, baseMergeIntentUsedSQL, bm.IntentID).Scan(&one)
+		switch {
+		case err == nil:
+			return fmt.Errorf("%w: intent %s already used by a base merge", ErrBaseMergeIntent, in.ID)
+		case !errors.Is(err, sql.ErrNoRows):
+			return err
 		}
 		_, err = tx.ExecContext(ctx, insertBaseMergeSQL, string(bm.Key), bm.ChangeID, bm.MergeSHA, bm.BaseSHA,
 			bm.ParentHeadSHA, bm.IntentID, ms(bm.CreatedAt))
