@@ -13,6 +13,7 @@ import (
 	"github.com/syllik/deep-dark-factory/internal/core/policy"
 	"github.com/syllik/deep-dark-factory/internal/core/policy/signature"
 	"github.com/syllik/deep-dark-factory/internal/core/ports"
+	"github.com/syllik/deep-dark-factory/internal/core/store"
 	"github.com/syllik/deep-dark-factory/internal/daemon"
 )
 
@@ -257,14 +258,21 @@ func TestTick_MergeResumesCloseAfterError(t *testing.T) {
 	if task, err = e.store.GetTask(t.Context(), task.Key); err != nil {
 		t.Fatal(err)
 	}
-	if task.State != model.TaskStateMerge {
-		t.Errorf("task = %s, want merge after the failed close", task.State)
+	if task.State != model.TaskStateDone || len(task.Flags) != 0 {
+		t.Errorf("task = %s %v, want done without flags after the failed close", task.State, task.Flags)
 	}
 	c := storedChange(t, e, task.Key)
 	if c.MergeSHA == "" || c.MergedAt == nil || c.Open {
 		t.Fatalf("stored change = %+v, want merged", c)
 	}
+	if pending, err := e.store.PendingIntents(t.Context()); err != nil || len(pending) != 0 {
+		t.Fatalf("pending intents = %v, %v; want none (the failed close is resolved)", pending, err)
+	}
+	if cands, err := e.forge.ListCandidateTasks(t.Context()); err != nil || len(cands) != 1 {
+		t.Fatalf("candidates = %v, %v; want the still open forge task", cands, err)
+	}
 
+	// The next tick closes the forge task of the done task.
 	if err := e.engine.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -274,6 +282,13 @@ func TestTick_MergeResumesCloseAfterError(t *testing.T) {
 	if task.State != model.TaskStateDone {
 		t.Errorf("task = %s, want done", task.State)
 	}
+	if cands, err := e.forge.ListCandidateTasks(t.Context()); err != nil || len(cands) != 0 {
+		t.Errorf("candidates = %v, %v; want none (forge task closed)", cands, err)
+	}
+	// A done task no longer listed is left alone.
+	if err := e.engine.Tick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	if n := countCreates(e, model.IntentOperationMerge); n != 1 {
 		t.Errorf("merge intents = %d, want 1", n)
 	}
@@ -282,5 +297,42 @@ func TestTick_MergeResumesCloseAfterError(t *testing.T) {
 	}
 	if tip := mainTip(t, e); tip != c.MergeSHA {
 		t.Errorf("bare main = %s, want merge sha %s", tip, c.MergeSHA)
+	}
+}
+
+// stateAtClose records the stored task state at every CloseTask call.
+type stateAtClose struct {
+	ports.Forge
+	st     *store.Store
+	key    *model.TaskKey
+	states []model.TaskState
+}
+
+func (f *stateAtClose) CloseTask(ctx context.Context, mode ports.WriteMode, src model.TaskSource, comment string) error {
+	task, err := f.st.GetTask(ctx, *f.key)
+	if err != nil {
+		return err
+	}
+	f.states = append(f.states, task.State)
+	return f.Forge.CloseTask(ctx, mode, src, comment)
+}
+
+func TestTick_MergeMovesToDoneBeforeClose(t *testing.T) {
+	var sac *stateAtClose
+	e := newEngEnv(t, ports.WriteModeLive, func(s *daemon.Settings, d *daemon.Deps) {
+		mergeIntegration(s, d)
+		sac = &stateAtClose{Forge: d.Forge}
+		d.Forge = sac
+	})
+	sac.st, sac.key = e.store, &e.key
+	e.addInbox(t)
+	e.scriptToMerge()
+	e.tickUntil(t, 15, model.TaskStateDone)
+	if !slices.Equal(sac.states, []model.TaskState{model.TaskStateDone}) {
+		t.Errorf("stored task states at close-task = %v, want [done]", sac.states)
+	}
+	evs := e.rec.eventStrings()
+	if i, j := slices.Index(evs, "create merge dryRun=false"), slices.Index(evs, "create close-task dryRun=false"); i < 0 || j < i {
+		t.Errorf("intent and write calls = %v, want merge before close-task", evs)
 	}
 }

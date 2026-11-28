@@ -71,7 +71,8 @@ type Config struct {
 	Identity git.Identity
 }
 
-// Ports are the externally provided ports of the engine.
+// Ports are the externally provided ports of the engine. Lock is optional;
+// with a Lock set, the engine ticks only after Daemon.Recover succeeded.
 type Ports struct {
 	Agent   ports.Agent
 	Sandbox ports.Sandbox
@@ -79,13 +80,15 @@ type Ports struct {
 	Clock   ports.Clock
 	IDs     ports.IDSource
 	Logger  *slog.Logger
+	Lock    ports.Lock
 }
 
 // Daemon is an opened engine and the resources Close releases.
 type Daemon struct {
 	// Engine runs the ticks.
-	Engine *Engine
-	store  *store.Store
+	Engine  *Engine
+	store   *store.Store
+	release func() error
 }
 
 // Open loads the config through config.Loader, selects the connected
@@ -215,6 +218,8 @@ func Open(ctx context.Context, cfg Config, p Ports) (_ *Daemon, err error) {
 	}, Deps{
 		Store:     st,
 		Forge:     forge,
+		Sandbox:   p.Sandbox,
+		Lock:      p.Lock,
 		Agent:     p.Agent,
 		Secrets:   p.Secrets,
 		Clock:     p.Clock,
@@ -235,18 +240,44 @@ func Open(ctx context.Context, cfg Config, p Ports) (_ *Daemon, err error) {
 	return &Daemon{Engine: engine, store: st}, nil
 }
 
-// Close closes the store. It is safe on a nil Daemon or a Daemon whose store
-// is already closed by an earlier Close.
+// Recover runs Engine.Recover once and keeps the instance lock's release
+// for Close.
+func (d *Daemon) Recover(ctx context.Context) error {
+	if d == nil || d.Engine == nil {
+		return errors.New("recover daemon: nil daemon or engine")
+	}
+	if d.release != nil {
+		return errors.New("recover daemon: already recovered")
+	}
+	rel, err := d.Engine.Recover(ctx)
+	if err != nil {
+		return fmt.Errorf("recover daemon: %w", err)
+	}
+	d.release = rel
+	return nil
+}
+
+// Close releases the instance lock taken by Recover and closes the store.
+// It is safe on a nil Daemon or a Daemon already closed by an earlier
+// Close.
 func (d *Daemon) Close() error {
-	if d == nil || d.store == nil {
+	if d == nil {
 		return nil
 	}
-	st := d.store
-	d.store = nil
-	if err := st.Close(); err != nil {
-		return fmt.Errorf("close daemon: %w", err)
+	var errs []error
+	if rel := d.release; rel != nil {
+		d.release = nil
+		if err := rel(); err != nil {
+			errs = append(errs, fmt.Errorf("close daemon: release instance lock: %w", err))
+		}
 	}
-	return nil
+	if st := d.store; st != nil {
+		d.store = nil
+		if err := st.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close daemon: %w", err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (p Ports) check() error {
