@@ -122,7 +122,7 @@ func (e *Engine) review(ctx context.Context, it tickTask) error {
 	if err != nil {
 		return fmt.Errorf("review: diff: %w", err)
 	}
-	br, err := reviewBrief(it, head, string(diff), checks, required)
+	reviews, err := e.deps.Store.ListReviews(ctx, t.Key, change.ID)
 	if err != nil {
 		return err
 	}
@@ -131,7 +131,15 @@ func (e *Engine) review(ctx context.Context, it tickTask) error {
 	var results []lifecycle.ReviewResult
 	var last *runInfo
 	for _, rv := range required {
-		res, done, err := e.runReviewer(ctx, t, status, change, head, rv, br, w)
+		pr, err := e.priorReview(ctx, reviews, rv.Role, head)
+		if err != nil {
+			return err
+		}
+		br, err := reviewBrief(it, head, string(diff), checks, required, pr.findings, info.Body)
+		if err != nil {
+			return err
+		}
+		res, done, err := e.runReviewer(ctx, t, status, change, head, rv, br, w, pr)
 		if err != nil || done {
 			return err
 		}
@@ -172,6 +180,30 @@ func (e *Engine) review(ctx context.Context, it tickTask) error {
 	return fmt.Errorf("route review: unknown action %q", o.Action)
 }
 
+// prior is the prior review of one role: the findings of its highest-round
+// review on the change whose head differs from the current head. has is
+// false when that role has none; findings is then empty.
+type prior struct {
+	findings []model.Finding
+	has      bool
+}
+
+// priorReview returns the prior review of role for head among reviews.
+func (e *Engine) priorReview(ctx context.Context, reviews []model.Review, role model.Role, head string) (prior, error) {
+	r, ok := latestReview(reviews, role, func(h string) bool { return h != head })
+	if !ok {
+		return prior{findings: []model.Finding{}}, nil
+	}
+	fs, err := e.deps.Store.ListFindings(ctx, r.ID)
+	if err != nil {
+		return prior{}, err
+	}
+	if fs == nil {
+		fs = []model.Finding{}
+	}
+	return prior{findings: fs, has: true}, nil
+}
+
 // reviewed is one reviewer's routed result and the run behind it.
 type reviewed struct {
 	result lifecycle.ReviewResult
@@ -182,7 +214,7 @@ type reviewed struct {
 // signed review and posts its projection. done reports that the step ended
 // here because an outcome was applied to t.
 func (e *Engine) runReviewer(ctx context.Context, t model.Task, status lifecycle.Status, change model.Change, head string,
-	rv policy.Reviewer, br []byte, w *ForgeWrites) (out reviewed, done bool, err error) {
+	rv policy.Reviewer, br []byte, w *ForgeWrites, pr prior) (out reviewed, done bool, err error) {
 	g := e.deps.Git
 	dir := filepath.Join(e.settings.ScratchDir, "run-"+e.deps.IDs.NewID())
 	if err := g.NewRunCopy(ctx, e.settings.CloneDir, head, dir); err != nil {
@@ -276,16 +308,19 @@ func (e *Engine) runReviewer(ctx context.Context, t model.Task, status lifecycle
 	return reviewed{
 		result: lifecycle.ReviewResult{
 			Role: rv.Role, Head: head, Verdict: r.Verdict, Findings: findings, RaiseRisk: r.RaiseRisk,
-			Checklist: checklist, HasPrior: false,
+			Checklist: checklist, Prior: pr.findings, HasPrior: pr.has,
 		},
 		run: ri,
 	}, false, nil
 }
 
-// reviewBrief is the reviewer brief: the task brief plus the head, its diff
-// from the merge base, its checks and the reviewer roles. Prior findings are
-// empty in this slice.
-func reviewBrief(it tickTask, head, diff string, checks []ports.Check, required []policy.Reviewer) ([]byte, error) {
+// reviewBrief is the reviewer brief of one role: the task brief plus the
+// head, its diff from the merge base, its checks, the reviewer roles, the
+// findings of that role's prior review (empty on a first review) and the
+// forge change body as untrusted data, which carries the Executor's wontFix
+// list.
+func reviewBrief(it tickTask, head, diff string, checks []ports.Check, required []policy.Reviewer,
+	priorFindings []model.Finding, changeBody string) ([]byte, error) {
 	cs := make([]reviewCheck, 0, len(checks))
 	for _, c := range checks {
 		cs = append(cs, reviewCheck{Name: c.Name, Completed: c.Completed, Passed: c.Passed})
@@ -304,7 +339,8 @@ func reviewBrief(it tickTask, head, diff string, checks []ports.Check, required 
 		Checks        []reviewCheck   `json:"checks"`
 		Reviewers     []model.Role    `json:"reviewers"`
 		PriorFindings []model.Finding `json:"priorFindings"`
-	}{it.task.Title, it.cand.Body, it.task.Spec, it.task.Acceptance, head, diff, cs, roles, []model.Finding{}})
+		ChangeBody    string          `json:"changeBody"`
+	}{it.task.Title, it.cand.Body, it.task.Spec, it.task.Acceptance, head, diff, cs, roles, priorFindings, changeBody})
 	if err != nil {
 		return nil, fmt.Errorf("encode review brief: %w", err)
 	}

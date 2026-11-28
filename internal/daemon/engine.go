@@ -36,6 +36,7 @@ type Store interface {
 	NextReviewRound(ctx context.Context, key model.TaskKey, changeID string, role model.Role) (int, error)
 	CreateReview(ctx context.Context, r model.Review, findings []model.Finding) error
 	ListReviews(ctx context.Context, key model.TaskKey, changeID string) ([]model.Review, error)
+	ListFindings(ctx context.Context, reviewID string) ([]model.Finding, error)
 	ListBaseMerges(ctx context.Context, key model.TaskKey, changeID string) ([]store.BaseMerge, error)
 	PendingIntents(ctx context.Context) ([]model.Intent, error)
 	AppendEvent(ctx context.Context, ev model.Event) error

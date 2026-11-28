@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/syllik/deep-dark-factory/internal/core/lifecycle"
 	"github.com/syllik/deep-dark-factory/internal/core/model"
+	"github.com/syllik/deep-dark-factory/internal/core/policy"
 	"github.com/syllik/deep-dark-factory/internal/core/ports"
 	"github.com/syllik/deep-dark-factory/internal/core/publisher"
 	"github.com/syllik/deep-dark-factory/internal/core/scheduler"
@@ -68,6 +68,13 @@ type plannerResult struct {
 type executorResult struct {
 	Verdict model.ExecutorVerdict `json:"verdict"`
 	Summary string                `json:"summary"`
+	WontFix []wontFix             `json:"wontFix"`
+}
+
+// wontFix is one finding the Executor declined, with its reason.
+type wontFix struct {
+	FindingID string `json:"findingId"`
+	Reason    string `json:"reason"`
 }
 
 // Tick runs one pass: ingest, intake of new candidates, then at most one
@@ -218,8 +225,7 @@ func (e *Engine) step(ctx context.Context, it tickTask, dec scheduler.Decision) 
 	case model.TaskStateMerge:
 		return e.merge(ctx, it)
 	case model.TaskStateFixing:
-		// Correction batches are Task 12b.
-		return nil
+		return e.fix(ctx, it)
 	case model.TaskStateDone:
 		return e.closeDone(ctx, t)
 	}
@@ -394,115 +400,169 @@ func (e *Engine) integrationTip(ctx context.Context) (string, error) {
 	return string(bytes.TrimSpace(out)), nil
 }
 
-// execute runs the Executor on a task in running and publishes its patch
-// in the same step, so the patch is never stored.
-func (e *Engine) execute(ctx context.Context, it tickTask) (err error) {
-	t := it.task
-	g := e.deps.Git
-	clone := e.settings.CloneDir
-	if err := g.Fetch(ctx, clone); err != nil {
+// execute runs the Executor on a task in running as the initial batch on
+// the integration tip and publishes its patch in the same step, so the patch
+// is never stored.
+func (e *Engine) execute(ctx context.Context, it tickTask) error {
+	if err := e.deps.Git.Fetch(ctx, e.settings.CloneDir); err != nil {
 		return err
 	}
 	base, err := e.integrationTip(ctx)
 	if err != nil {
 		return err
 	}
-	copyID := e.deps.IDs.NewID()
-	dir := filepath.Join(e.settings.ScratchDir, "run-"+copyID)
-	if err := g.NewRunCopy(ctx, clone, base, dir); err != nil {
-		return err
-	}
-	defer func() {
-		if rmErr := os.RemoveAll(dir); rmErr != nil {
-			err = errors.Join(err, fmt.Errorf("remove run copy: %w", rmErr))
-		}
-	}()
 	br, err := brief(it)
 	if err != nil {
 		return err
 	}
-	status := statusOf(t)
-	res, _, owner, err := e.runAgent(ctx, t, status, runSpec{
-		Role: model.RoleExecutor, Purpose: model.RunPurposeInitial, Brief: br, Workspace: os.DirFS(dir),
-	})
-	if err != nil {
-		return err
-	}
-	run := &runInfo{role: model.RoleExecutor, usage: res.Usage}
-	if owner != nil {
-		_, err := e.apply(ctx, t, *owner, run)
-		return err
-	}
-	var r executorResult
-	if err := json.Unmarshal(res.Result, &r); err != nil {
-		return fmt.Errorf("decode executor result: %w", err)
-	}
-	o, err := lifecycle.RouteExecutor(status, r.Verdict)
-	if err != nil {
-		return fmt.Errorf("route executor verdict: %w", err)
-	}
-	if t, err = e.apply(ctx, t, o, run); err != nil || o.Flag != "" {
-		return err
-	}
-	if err := e.publish(ctx, t, copyID, base, res.Patch, r.Summary); err != nil {
-		// The patch is never stored, so a task left in publishing cannot
-		// resume (#146). The flag is written even when ctx is canceled.
-		_, applyErr := e.apply(context.WithoutCancel(ctx), t, *ownerOutcome(statusOf(t), "publish failed"), nil)
-		return errors.Join(err, applyErr)
-	}
-	return nil
+	return e.runBatch(ctx, it, it.task, batch{purpose: model.RunPurposeInitial, base: base, brief: br})
 }
 
-// publish prepares the revision of a task in publishing and, when it is
-// Ready, publishes it through the intents and moves the task to ci.
-func (e *Engine) publish(ctx context.Context, t model.Task, runID, base string, patch []byte, notes string) error {
+// revision is one Executor patch to publish: kind is the batch purpose
+// (initial, correction or ci-fix) and change the stored change it revises,
+// nil for the first revision. base is the commit the patch was exported
+// against: the integration tip for the first revision, the change head
+// later.
+type revision struct {
+	runID   string
+	kind    model.RunPurpose
+	change  *model.Change
+	base    string
+	patch   []byte
+	summary string
+	wontFix []wontFix
+}
+
+// agentNotes is the summary plus, when wontFix is non-empty, a daemon-written
+// 'Won't fix:' list with one line per entry. The Publisher sanitizes and
+// redacts it with the rest of the change body.
+func agentNotes(summary string, wontFix []wontFix) string {
+	if len(wontFix) == 0 {
+		return summary
+	}
+	line := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	var b strings.Builder
+	b.WriteString(summary)
+	b.WriteString("\n\nWon't fix:\n")
+	for _, w := range wontFix {
+		fmt.Fprintf(&b, "- %s: %s\n", line(w.FindingID), line(w.Reason))
+	}
+	return b.String()
+}
+
+// publish prepares the revision rv of a task in publishing and, when it is
+// Ready, publishes it through the intents (open-change for the first
+// revision, update-change later) and moves the task to ci. On a local gate
+// failure the task moves to fixing and the stored task and the failure are
+// returned, so the caller runs a correction batch.
+func (e *Engine) publish(ctx context.Context, t model.Task, rv revision) (model.Task, *publisher.GateFailed, error) {
 	forge := e.deps.Forge
 	s := e.settings
 	key := string(t.Key)
 	if len(key) < 12 {
-		return fmt.Errorf("publish: task key %q too short", key)
+		return t, nil, fmt.Errorf("publish: task key %q too short", key)
 	}
 	branch := changeBranchPrefix + key[:12]
+	branchHead, changedFrom, tip := "", rv.base, rv.base
+	if c := rv.change; c != nil {
+		if rv.base != c.HeadSHA {
+			return t, nil, fmt.Errorf("publish: base %s is not the change head %s", rv.base, c.HeadSHA)
+		}
+		var err error
+		if tip, err = e.integrationTip(ctx); err != nil {
+			return t, nil, err
+		}
+		if changedFrom, err = e.mergeBase(ctx, tip, c.HeadSHA); err != nil {
+			return t, nil, fmt.Errorf("publish: %w", err)
+		}
+		branch, branchHead = c.Branch, c.HeadSHA
+	}
 	out, err := e.deps.Publisher.Prepare(ctx, publisher.Input{
-		Key: t.Key, RunID: runID, TaskRef: t.SourceID, Title: t.Title,
-		Branch: branch, BaseBranch: s.Project.IntegrationBranch, BranchHead: "",
-		Base: base, ChangedFrom: base, Patch: patch, Profile: s.Profile, PlannerRisk: t.PlannerRisk,
+		Key: t.Key, RunID: rv.runID, TaskRef: t.SourceID, Title: t.Title,
+		Branch: branch, BaseBranch: s.Project.IntegrationBranch, BranchHead: branchHead,
+		Base: rv.base, ChangedFrom: changedFrom, Patch: rv.patch, Profile: s.Profile, PlannerRisk: t.PlannerRisk,
 		Template: s.ChangeTemplate, Verify: s.Project.Verify, Registries: s.Project.Registries,
-		AgentNotes: notes, Identity: s.Identity,
+		AgentNotes: agentNotes(rv.summary, rv.wontFix), Identity: s.Identity,
 	})
 	if err != nil {
-		return err
+		return t, nil, err
 	}
 	status := statusOf(t)
 	var o lifecycle.Outcome
 	switch r := out.(type) {
 	case publisher.Ready:
-		t.Risk = r.Class
-		info, err := publisher.Publish(ctx, s.Mode, e.intents.Pusher(t.Key, e.deps.Pusher), e.intents.ChangeWriter(t.Key, e.intents.Forge(forge), false), r)
-		if err != nil {
-			return err
+		// The risk class is never lowered by a later revision.
+		risk := r.Class
+		if t.Risk != "" {
+			if risk, err = policy.Raise(t.Risk, r.Class); err != nil {
+				return t, nil, fmt.Errorf("publish: raise risk: %w", err)
+			}
 		}
-		e.deps.Logger.Info("revision published", "key", key, "changeId", info.ID, "head", r.Commit, "mode", string(s.Mode))
+		t.Risk = risk
+		cw := e.intents.ChangeWriter(t.Key, e.intents.Forge(forge), rv.change != nil)
+		info, err := publisher.Publish(ctx, s.Mode, e.intents.Pusher(t.Key, e.deps.Pusher), cw, r)
+		if err != nil {
+			return t, nil, err
+		}
+		e.deps.Logger.Info("revision published", "key", key, "changeId", info.ID, "head", r.Commit,
+			"kind", string(rv.kind), "mode", string(s.Mode))
 		if s.Mode == ports.WriteModeLive {
-			if err := e.recordChange(ctx, t, info.ID, branch, base, r.Commit); err != nil {
-				return err
+			if rv.change == nil {
+				err = e.recordChange(ctx, t, info.ID, branch, rv.base, r.Commit)
+			} else {
+				err = e.updateChange(ctx, *rv.change, rv.kind, tip, r.Commit)
+			}
+			if err != nil {
+				return t, nil, err
 			}
 		}
 		if o, err = lifecycle.Advance(status); err != nil {
-			return err
+			return t, nil, err
 		}
 	case publisher.NeedsOwner:
 		o = lifecycle.Outcome{State: t.State, Flag: model.TaskFlagNeedsOwner, SetHitStop: r.HitStop, Reason: string(r.Stop)}
 	case publisher.Failed:
 		o = lifecycle.Outcome{State: t.State, Flag: model.TaskFlagFailed, Reason: string(r.Reason)}
 	case publisher.GateFailed:
-		// Correction batches are Task 12b.
-		o = lifecycle.Outcome{State: t.State, Flag: model.TaskFlagNeedsOwner, Reason: fmt.Sprintf("local gate failed at verify command %d", r.Index)}
+		e.deps.Logger.Info("local gate failed; correction batch next", "key", key, "index", r.Index,
+			"exitCode", r.Outcome.ExitCode, "timedOut", r.Outcome.TimedOut)
+		next, err := e.apply(ctx, t, lifecycle.Outcome{State: model.TaskStateFixing,
+			Reason: fmt.Sprintf("local gate failed at verify command %d", r.Index)}, nil)
+		if err != nil {
+			return t, nil, err
+		}
+		return next, &r, nil
 	default:
-		return fmt.Errorf("publish: unknown publisher outcome %T", out)
+		return t, nil, fmt.Errorf("publish: unknown publisher outcome %T", out)
 	}
-	_, err = e.apply(ctx, t, o, nil)
-	return err
+	next, err := e.apply(ctx, t, o, nil)
+	return next, nil, err
+}
+
+// updateChange stores head as the new head of change c: revision + 1 for a
+// correction batch and unchanged for a CI-fix, the patch-id of head against
+// tip and its CI wait starting now.
+func (e *Engine) updateChange(ctx context.Context, c model.Change, kind model.RunPurpose, tip, head string) error {
+	switch kind {
+	case model.RunPurposeCorrection:
+		c.Revision++
+	case model.RunPurposeCIFix:
+	case model.RunPurposePlanning, model.RunPurposeInitial, model.RunPurposeSync, model.RunPurposeReview:
+		// A sync batch revision is part 3 (#162).
+		return fmt.Errorf("update change: revision kind %q on an existing change", kind)
+	default:
+		return fmt.Errorf("update change: unknown revision kind %q", kind)
+	}
+	pid, err := e.deps.Git.PatchID(ctx, e.settings.CloneDir, tip, head)
+	if err != nil {
+		return fmt.Errorf("update change: %w", err)
+	}
+	now := e.deps.Clock.Now()
+	c.HeadSHA, c.PatchID, c.CISince, c.UpdatedAt = head, pid, &now, now
+	if err := e.deps.Store.UpdateChange(ctx, c); err != nil {
+		return fmt.Errorf("update change: %w", err)
+	}
+	return nil
 }
 
 // recordChange stores the published change of t as revision 1, open, with
@@ -524,35 +584,78 @@ func (e *Engine) recordChange(ctx context.Context, t model.Task, id, branch, bas
 	return nil
 }
 
-// checkCI moves a task in ci to review once the checks of its change head
-// pass; otherwise it stays.
+// checkCI routes a task in ci by the checks of its stored change head:
+// passing checks move it to review, a failed check moves it to fixing (the
+// CI-fix batch runs on the next tick), otherwise it stays until the CI wait
+// bound. Without a stored change (dry-run) it stays. There is no automatic
+// check rerun: RerunChecks has no intent operation.
 func (e *Engine) checkCI(ctx context.Context, t model.Task) error {
 	forge := e.deps.Forge
-	change, found, err := forge.FindChangeByTaskKey(ctx, t.Key)
+	change, found, err := e.taskChange(ctx, t.Key)
+	if err != nil || !found {
+		return err
+	}
+	info, found, err := forge.FindChangeByTaskKey(ctx, t.Key)
 	if err != nil {
 		return err
 	}
 	if !found {
+		e.deps.Logger.Info("task in ci: stored change not found on the forge", "key", string(t.Key), "changeId", change.ID)
 		return nil
+	}
+	status := statusOf(t)
+	if !info.Open {
+		_, err := e.apply(ctx, t, lifecycle.Outcome{State: t.State, Flag: model.TaskFlagHold, Reason: "change closed by a human"}, nil)
+		return err
+	}
+	head := change.HeadSHA
+	if info.HeadSHA != head {
+		_, err := e.apply(ctx, t, *ownerOutcome(status, "change head moved outside DDF"), nil)
+		return err
 	}
 	if e.deps.Checks != nil && e.settings.Mode == ports.WriteModeLive {
 		if err := e.deps.Checks.RunChecks(ctx); err != nil {
 			return err
 		}
 	}
-	checks, err := forge.ReadChecks(ctx, change.HeadSHA)
+	checks, err := forge.ReadChecks(ctx, head)
 	if err != nil {
 		return err
 	}
-	if !checksPass(e.settings.Profile.RequiredChecks, change.HeadSHA, checks) {
-		return nil
-	}
-	o, err := lifecycle.Advance(statusOf(t))
-	if err != nil {
-		return err
+	required := e.settings.Profile.RequiredChecks
+	var o lifecycle.Outcome
+	switch {
+	case checksPass(required, head, checks):
+		if o, err = lifecycle.Advance(status); err != nil {
+			return err
+		}
+	case len(failedChecks(required, head, checks)) > 0:
+		o = lifecycle.Outcome{State: model.TaskStateFixing, Reason: "checks failed"}
+	case change.CISince == nil:
+		o = *ownerOutcome(status, "change has no ci wait start")
+	default:
+		if o, err = lifecycle.CheckCIWait(status, change, e.settings.Limits, e.deps.Clock.Now()); err != nil {
+			return fmt.Errorf("check ci wait: %w", err)
+		}
 	}
 	_, err = e.apply(ctx, t, o, nil)
 	return err
+}
+
+// failedChecks returns the names of the required checks (every check when
+// none is required) that completed and failed on head.
+func failedChecks(required []string, head string, checks []ports.Check) []string {
+	var out []string
+	for _, c := range checks {
+		if c.HeadSHA != head || !c.Completed || c.Passed {
+			continue
+		}
+		if required != nil && !slices.Contains(required, c.Name) {
+			continue
+		}
+		out = append(out, c.Name)
+	}
+	return out
 }
 
 // checksPass reports whether every required check passed on head; with no
